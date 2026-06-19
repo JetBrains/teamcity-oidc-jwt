@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<teamcity-plugin xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:schemas-jetbrains-com:teamcity-plugin-v1-xml">
+  <info>
+    <name>oidc-jwt</name>
+    <display-name>OIDC JWT</display-name>
+    <version>@Version@</version>
+    <description>Generates OIDC JWTs that identify builds</description>
+    <download-url>https://github.com/JetBrains/sre-teamcity-jwt</download-url>
+    <email>sre@jetbrains.com</email>
+    <vendor>
+      <name>@VendorName@</name>
+      <url>@VendorURL@</url>
+      <logo>Plugin vendor logo URL</logo>
+    </vendor>
+  </info>
+  <deployment use-separate-classloader="true" allow-runtime-reload="true" node-responsibilities-aware="true"/>
+</teamcity-plugin>

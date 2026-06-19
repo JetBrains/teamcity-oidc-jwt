@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<assembly>
+  <id>gcp-plugin-assembly</id>
+  <includeBaseDirectory>false</includeBaseDirectory>
+  <formats>
+    <format>zip</format>
+  </formats>
+  <files>
+    <file>
+      <source>target/gcp-signer/teamcity-plugin.xml</source>
+      <outputDirectory>/</outputDirectory>
+    </file>
+  </files>
+  <moduleSets>
+    <moduleSet>
+      <useAllReactorProjects>true</useAllReactorProjects>
+      <includes>
+        <include>org.jetbrains.teamcity.builds:gcp-signer</include>
+      </includes>
+      <binaries>
+        <outputDirectory>server</outputDirectory>
+        <unpack>false</unpack>
+        <dependencySets>
+          <dependencySet>
+            <scope>runtime</scope>
+            <includes>
+              <include>*</include>
+            </includes>
+          </dependencySet>
+        </dependencySets>
+      </binaries>
+    </moduleSet>
+  </moduleSets>
+</assembly>

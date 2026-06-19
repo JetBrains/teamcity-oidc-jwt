@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dsl-extension kind="buildFeature" type="oidcTokenInParams" generateDslJar="true">
+  <class name="OIDCTokenInParams">
+    <description>
+      A build feature that issues a JWT for OIDC authentication when a build starts and provides it via build parameters.
+    </description>
+  </class>
+  <function name="oidcTokenInParams">
+    <description>
+      Issue a JWT for OIDC authentication when a build starts	and provide it via build parameters.
+    </description>
+  </function>
+  <params>
+    <param name="audiences" dslName="audiences" type="string" mandatory="true">
+      <description>
+        Newline-separated list of audience values for the `aud` claim in the JWT. When empty, use the default
+        audience (== `iss` claim).
+      </description>
+    </param>
+    <param name="buildParam" dslName="buildParam" type="string" mandatory="false">
+      <description>
+        Name of the build parameter that receives the token. Empty string disables the build parameter.
+        The default value is `env.TEAMCITY_BUILD_OIDC_TOKEN`.
+      </description>
+    </param>
+    <param name="tokenLifetimeSeconds" dslName="tokenLifetimeSeconds" type="int" mandatory="false">
+      <description>
+        Seconds before the token provided via build parameters expires. When this value is negative or zero, the default
+        token lifetime is used (build timeout plus 10 minutes).
+      </description>
+    </param>
+  </params>
+  <examples>
+    <example>
+      <description>
+        Issue a JWT for `https://oidc.example.com` using the default parameter and token lifetime
+      </description>
+      <code>
+        oidcTokenInParams {
+          audiences = "https://oidc.example.com"
+        }
+      </code>
+    </example>
+    <example>
+      <description>
+        Issue a JWT for multiple audiences
+      </description>
+      <code>
+        oidcTokenInParams {
+          audiences = """
+            https://oidc.example.com
+            https://another.example.com
+          """.trimIndent()
+        }
+      </code>
+    </example>
+    <example>
+      <description>
+        Provide a JWT via custom environment variable
+      </description>
+      <code>
+        oidcTokenInParams {
+          audiences = "https://oidc.example.com"
+          buildParam = "env.MY_OIDC_TOKEN"
+        }
+      </code>
+    </example>
+    <example>
+      <description>
+        Set a custom token lifetime of 1 hour.
+      </description>
+      <code>
+        oidcTokenInParams {
+          audiences = "https://oidc.example.com"
+          tokenLifetimeSeconds = 3600
+        }
+      </code>
+    </example>
+  </examples>
+</dsl-extension>

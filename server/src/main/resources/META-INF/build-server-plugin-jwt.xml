@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:mvc="http://www.springframework.org/schema/mvc"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+                            http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+                            http://www.springframework.org/schema/mvc
+                            http://www.springframework.org/schema/mvc/spring-mvc-3.0.xsd"
+       default-autowire="constructor">
+
+    <!-- Settings persistence -->
+    <bean class="org.jetbrains.teamcity.builds.oidc.OIDCGlobalSettingsStore" />
+    <bean class="org.jetbrains.teamcity.builds.oidc.OIDCSettings" />
+
+    <!-- Signer registry -->
+    <bean class="org.jetbrains.teamcity.builds.oidc.signer.JWTSignerRegistry" />
+
+    <!-- JWK cache -->
+    <bean class="org.jetbrains.teamcity.builds.oidc.cache.MultiNodeJWKCache" />
+    <bean class="org.jetbrains.teamcity.builds.oidc.cache.JWKCachePurgeController" />
+
+    <!-- Signer implementations -->
+    <bean class="org.jetbrains.teamcity.builds.oidc.signer.builtin.BuiltInRSASigner" />
+    <bean class="org.jetbrains.teamcity.builds.oidc.signer.builtin.BuiltInRSASettingsStore" />
+    <bean class="org.jetbrains.teamcity.builds.oidc.signer.builtin.BuiltInECDSASigner" />
+    <bean class="org.jetbrains.teamcity.builds.oidc.signer.builtin.BuiltInECDSASettingsStore" />
+
+    <!-- OIDC endpoints controller -->
+    <bean class="org.jetbrains.teamcity.builds.oidc.OIDCWellKnownController" />
+
+    <!-- On demand issuer build feature -->
+    <bean class="org.jetbrains.teamcity.builds.oidc.buildfeature.ondemand.OIDCTokenOnDemandBuildFeature" />
+    <bean class="org.jetbrains.teamcity.builds.oidc.buildfeature.ondemand.OIDCTokenOnDemandBuildFeatureController" />
+    <bean class="org.jetbrains.teamcity.builds.oidc.buildfeature.ondemand.OIDCOnDemandTokenIssuerController" />
+
+    <!-- In-params issuer build feature -->
+    <bean class="org.jetbrains.teamcity.builds.oidc.buildfeature.inparams.OIDCTokenInParamsBuildFeature" />
+    <bean class="org.jetbrains.teamcity.builds.oidc.buildfeature.inparams.OIDCTokenInParamsBuildFeatureController" />
+
+    <!-- Build parameter injection -->
+    <bean class="org.jetbrains.teamcity.builds.oidc.injection.OIDCTokenBuildParametersProvider" />
+    <bean class="org.jetbrains.teamcity.builds.oidc.injection.OIDCTokenBuildStartContextProcessor" />
+
+    <!-- Admin UI -->
+    <bean class="org.jetbrains.teamcity.builds.oidc.admin.OIDCAdminPage" />
+    <bean class="org.jetbrains.teamcity.builds.oidc.admin.OIDCSettingsController" />
+
+    <mvc:annotation-driven/>
+</beans>

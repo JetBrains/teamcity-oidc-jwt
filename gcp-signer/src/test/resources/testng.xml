@@ -1,0 +1,15 @@
+<!DOCTYPE suite SYSTEM "http://testng.org/testng-1.0.dtd">
+<suite name="gcp-signer" verbose="1">
+  <test name="gcp-signer-tests">
+    <classes>
+      <class name="org.jetbrains.teamcity.builds.oidc.signer.gcp.CloudKMSSettingsTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.signer.gcp.CloudKMSSignerTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.signer.gcp.JWTKeyVersionTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.signer.gcp.admin.CloudKMSAdminSettingsTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.signer.gcp.admin.CloudKMSConnectionCheckerTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.signer.gcp.client.CloudKMSClientTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.signer.gcp.client.CloudKMSDefaultClientTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.signer.gcp.client.GCPCredentialsTest"/>
+    </classes>
+  </test>
+</suite>

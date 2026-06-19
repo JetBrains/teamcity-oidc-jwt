@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dsl-extension kind="buildFeature" type="oidcTokenOnDemand" generateDslJar="true">
+  <class name="OIDCTokenOnDemand">
+    <description>
+      A build feature that allows build configurations to request short-lived JWTs for OIDC authentication.
+    </description>
+  </class>
+  <function name="oidcTokenOnDemand">
+    <description>
+      Allow a build configuration	to request short-lived JWTs for OIDC authentication during the build.
+    </description>
+  </function>
+  <params>
+    <param name="audiences" dslName="audiences" type="string" mandatory="true">
+      <description>
+        Newline-separated list of allowed audience values for the `aud` claim in the JWT. When empty, only the default
+        audience (== `iss` claim) is allowed.
+      </description>
+    </param>
+  </params>
+  <examples>
+    <example>
+      <description>
+        Allow issuing a JWT for `https://oidc.example.com`.
+      </description>
+      <code>
+        oidcTokenOnDemand {
+          audiences = "https://oidc.example.com"
+        }
+      </code>
+    </example>
+    <example>
+      <description>
+        Allow issuing JWTs for multiple audiences.
+      </description>
+      <code>
+        oidcTokenOnDemand {
+          audiences = """
+            https://oidc.example.com
+            https://another.example.com
+          """.trimIndent()
+        }
+      </code>
+    </example>
+  </examples>
+</dsl-extension>

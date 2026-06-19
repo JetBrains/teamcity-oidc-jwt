@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.jetbrains.teamcity.builds</groupId>
+  <artifactId>jwt</artifactId>
+  <version>1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <properties>
+    <teamcity-version>2025.11</teamcity-version>
+    <kotlin.version>2.3.0</kotlin.version>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <!-- Reproducibility shenanigans -->
+    <file.encoding>UTF-8</file.encoding>
+    <user.language>en</user.language>
+    <user.country>US</user.country>
+    <user.variant/>
+    <project.build.outputTimestamp>2026-03-01T00:00:00Z</project.build.outputTimestamp>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+  <repositories>
+    <repository>
+      <id>JetBrains</id>
+      <url>https://download.jetbrains.com/teamcity-repository</url>
+    </repository>
+  </repositories>
+  <pluginRepositories>
+    <pluginRepository>
+      <id>JetBrains</id>
+      <url>https://download.jetbrains.com/teamcity-repository</url>
+    </pluginRepository>
+  </pluginRepositories>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.jetbrains.teamcity</groupId>
+        <artifactId>teamcity-sdk-maven-plugin</artifactId>
+        <version>0.4.3</version>
+        <configuration>
+          <!-- <teamcityDir>/path/to/tc/distro</teamcityDir> -->
+        </configuration>
+      </plugin>
+    </plugins>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.jetbrains.teamcity</groupId>
+          <artifactId>teamcity-sdk-maven-plugin</artifactId>
+          <version>0.4.3</version>
+          <configuration>
+            <!-- <teamcityDir>/path/to/tc/distro</teamcityDir> -->
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>3.5.0</version>
+          <configuration>
+            <archive>
+              <manifest>
+                <addDefaultEntries>true</addDefaultEntries>
+              </manifest>
+            </archive>
+          </configuration>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+  <dependencies>
+    <dependency>
+      <groupId>org.jetbrains.kotlin</groupId>
+      <artifactId>kotlin-stdlib</artifactId>
+      <version>${kotlin.version}</version>
+    </dependency>
+  </dependencies>
+  <modules>
+    <module>api</module>
+    <module>server</module>
+    <module>gcp-signer</module>
+    <module>build</module>
+  </modules>
+</project>

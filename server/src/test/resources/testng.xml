@@ -1,0 +1,29 @@
+<!DOCTYPE suite SYSTEM "http://testng.org/testng-1.0.dtd">
+<suite name="server" verbose="1">
+  <test name="server-tests">
+    <classes>
+      <class name="org.jetbrains.teamcity.builds.oidc.JWTClaimsGeneratorTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.OIDCSettingsTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.OIDCWellKnownControllerTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.admin.OIDCAdminPageTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.admin.OIDCSettingsControllerTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.buildfeature.inparams.InParamsPropertiesProcessorTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.buildfeature.inparams.OIDCTokenInParamsBuildFeatureControllerTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.buildfeature.inparams.OIDCTokenInParamsBuildFeatureTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.buildfeature.ondemand.OIDCOnDemandTokenIssuerControllerTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.buildfeature.ondemand.OIDCTokenOnDemandBuildFeatureControllerTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.buildfeature.ondemand.OIDCTokenOnDemandBuildFeatureTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.injection.OIDCTokenBuildParametersProviderTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.injection.OIDCTokenBuildStartContextProcessorTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.signer.JWTSignerRegistryTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.signer.builtin.BuiltInECDSASignerTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.signer.builtin.BuiltInRSASignerTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.signer.builtin.BuiltInRotationControllerTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.cache.JWKCachePurgeControllerTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.cache.MultiNodeJWKCacheTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.OIDCGlobalSettingsStoreTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.signer.builtin.BuiltInRSASettingsStoreTest"/>
+      <class name="org.jetbrains.teamcity.builds.oidc.signer.builtin.BuiltInECDSASettingsStoreTest"/>
+    </classes>
+  </test>
+</suite>
