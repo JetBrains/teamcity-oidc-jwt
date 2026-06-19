@@ -5,12 +5,12 @@
     <display-name>Google Cloud KMS signer for OIDC JWT</display-name>
     <version>@Version@</version>
     <description>Allows signing build JWTs with Google Cloud KMS</description>
-    <download-url>https://github.com/JetBrains/sre-teamcity-jwt</download-url>
+    <download-url>https://github.com/JetBrains/teamcity-oidc-jwt</download-url>
     <email>sre@jetbrains.com</email>
     <vendor>
       <name>@VendorName@</name>
       <url>@VendorURL@</url>
-      <logo>Plugin vendor logo URL</logo>
+      <logo>https://raw.githubusercontent.com/JetBrains/logos/refs/heads/master/web/jetbrains/icon-192.png</logo>
     </vendor>
   </info>
   <dependencies>

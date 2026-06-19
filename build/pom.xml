@@ -12,8 +12,8 @@
   <properties>
     <maven.build.timestamp.format>yyyyMMddHHmmss</maven.build.timestamp.format>
     <teamcity.jwt.plugin.version>snapshot-${maven.build.timestamp}</teamcity.jwt.plugin.version>
-    <teamcity.jwt.plugin.vendorName>JetBrains SRE</teamcity.jwt.plugin.vendorName>
-    <teamcity.jwt.plugin.vendorUrl>https://github.com/JetBrains/sre-teamcity-jwt</teamcity.jwt.plugin.vendorUrl>
+    <teamcity.jwt.plugin.vendorName>JetBrains</teamcity.jwt.plugin.vendorName>
+    <teamcity.jwt.plugin.vendorUrl>https://www.jetbrains.com/</teamcity.jwt.plugin.vendorUrl>
   </properties>
   <dependencies>
     <dependency>
