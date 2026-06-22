@@ -8,6 +8,7 @@ import com.nimbusds.jose.jwk.RSAKey
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.ServerPaths
 import jetbrains.buildServer.serverSide.ServerResponsibility
+import jetbrains.buildServer.serverSide.TeamCityNodes
 import jetbrains.buildServer.serverSide.auth.Permission
 import jetbrains.buildServer.serverSide.crypt.Encryption
 import jetbrains.buildServer.web.openapi.PluginDescriptor
@@ -38,6 +39,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
     private lateinit var jwkCache: JWKCache
     private lateinit var serverPaths: ServerPaths
     private lateinit var serverResponsibility: ServerResponsibility
+    private lateinit var teamCityNodes: TeamCityNodes
     private var currentSettings = BuiltInRSASettings()
     private val settingsUpdateHandlers = mutableListOf<() -> Unit>()
     private var signer: BuiltInRSASigner? = null
@@ -86,6 +88,10 @@ class BuiltInRSASignerTest : BaseTestCase() {
         serverResponsibility = mockk {
             every { canManageBuilds() } returns true
         }
+
+        teamCityNodes = mockk {
+            every { currentNode.id } returns "test-node-1"
+        }
     }
 
     @AfterMethod
@@ -104,7 +110,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
     }
 
     private fun createSigner(): BuiltInRSASigner {
-        val s = BuiltInRSASigner(controllerManager, serverResponsibility, serverPaths, encryption, pluginDescriptor, settingsStore, jwkCache)
+        val s = BuiltInRSASigner(controllerManager, teamCityNodes, serverResponsibility, serverPaths, encryption, pluginDescriptor, settingsStore, jwkCache)
         signer = s
         return s
     }
@@ -995,7 +1001,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
             JWTSignerException::class.java
         )
         // getKey wraps the capability error, so the specific message lives in the cause chain.
-        Assertions.assertThat(ex).hasStackTraceContaining("not configured to manage builds")
+        Assertions.assertThat(ex).hasStackTraceContaining("Cannot generate signing key on the current node")
         Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
         verify(exactly = 0) { jwkCache.trackKey(any(), any(), any()) }
     }

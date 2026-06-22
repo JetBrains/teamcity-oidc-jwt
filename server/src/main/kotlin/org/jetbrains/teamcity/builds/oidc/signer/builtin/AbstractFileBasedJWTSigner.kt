@@ -15,6 +15,7 @@ import jetbrains.buildServer.serverSide.IOGuard
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.ServerPaths
 import jetbrains.buildServer.serverSide.ServerResponsibility
+import jetbrains.buildServer.serverSide.TeamCityNodes
 import jetbrains.buildServer.serverSide.crypt.Encryption
 import jetbrains.buildServer.web.openapi.PluginDescriptor
 import jetbrains.buildServer.web.openapi.WebControllerManager
@@ -35,6 +36,7 @@ import kotlin.concurrent.write
  */
 abstract class AbstractFileBasedJWTSigner<K : JWK>(
     controllerManager: WebControllerManager,
+    private val teamCityNodes: TeamCityNodes,
     private val serverResponsibility: ServerResponsibility,
     serverPaths: ServerPaths,
     private val encryption: Encryption,
@@ -106,7 +108,9 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
                 val key = loadKey()
                     ?: if (generateIfMissing) {
                         if (!serverResponsibility.canManageBuilds()) {
-                            throw JWTSignerException("Cannot generate signing key: server is not configured to manage builds")
+                            throw JWTSignerException(
+                                "Cannot generate signing key on the current node (${teamCityNodes.currentNode.id})"
+                            )
                         }
                         generateKey().also { saveKey(it, keyFile) }
                     } else null

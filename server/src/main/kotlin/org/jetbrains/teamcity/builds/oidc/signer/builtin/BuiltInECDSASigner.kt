@@ -16,6 +16,7 @@ import com.nimbusds.jose.jwk.ECKey
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator
 import jetbrains.buildServer.serverSide.ServerPaths
 import jetbrains.buildServer.serverSide.ServerResponsibility
+import jetbrains.buildServer.serverSide.TeamCityNodes
 import jetbrains.buildServer.serverSide.crypt.Encryption
 import jetbrains.buildServer.util.Cached
 import jetbrains.buildServer.web.openapi.PluginDescriptor
@@ -29,6 +30,7 @@ import kotlin.concurrent.write
  */
 class BuiltInECDSASigner(
     controllerManager: WebControllerManager,
+    teamCityNodes: TeamCityNodes,
     serverResponsibility: ServerResponsibility,
     serverPaths: ServerPaths,
     encryption: Encryption,
@@ -37,6 +39,7 @@ class BuiltInECDSASigner(
     jwkCache: JWKCache,
 ) : AbstractFileBasedJWTSigner<ECKey>(
     controllerManager,
+    teamCityNodes,
     serverResponsibility,
     serverPaths,
     encryption,

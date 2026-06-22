@@ -10,6 +10,7 @@ import com.nimbusds.jose.jwk.gen.ECKeyGenerator
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.ServerPaths
 import jetbrains.buildServer.serverSide.ServerResponsibility
+import jetbrains.buildServer.serverSide.TeamCityNodes
 import jetbrains.buildServer.serverSide.auth.Permission
 import jetbrains.buildServer.serverSide.crypt.Encryption
 import jetbrains.buildServer.web.openapi.PluginDescriptor
@@ -37,6 +38,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     private lateinit var jwkCache: JWKCache
     private lateinit var serverPaths: ServerPaths
     private lateinit var serverResponsibility: ServerResponsibility
+    private lateinit var teamCityNodes: TeamCityNodes
     private var currentSettings = BuiltInECDSASettings()
     private val settingsUpdateHandlers = mutableListOf<() -> Unit>()
     private var signer: BuiltInECDSASigner? = null
@@ -85,6 +87,10 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         serverResponsibility = mockk {
             every { canManageBuilds() } returns true
         }
+
+        teamCityNodes = mockk {
+            every { currentNode.id } returns "test-node-1"
+        }
     }
 
     @AfterMethod
@@ -105,6 +111,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     private fun createSigner(): BuiltInECDSASigner {
         val s = BuiltInECDSASigner(
             controllerManager,
+            teamCityNodes,
             serverResponsibility,
             serverPaths,
             encryption,
@@ -894,7 +901,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
             JWTSignerException::class.java
         )
         // getKey wraps the capability error, so the specific message lives in the cause chain.
-        Assertions.assertThat(ex).hasStackTraceContaining("not configured to manage builds")
+        Assertions.assertThat(ex).hasStackTraceContaining("Cannot generate signing key on the current node")
         Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
         verify(exactly = 0) { jwkCache.trackKey(any(), any(), any()) }
     }
