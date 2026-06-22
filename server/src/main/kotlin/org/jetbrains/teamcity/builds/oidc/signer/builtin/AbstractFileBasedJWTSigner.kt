@@ -54,7 +54,7 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
 
     protected val fileWatcher: FileWatcher
 
-    private val rotationController = BuiltInRotationController(controllerManager, this)
+    private val rotationController = BuiltInRotationController(controllerManager, serverResponsibility, this)
 
     init {
         fileWatcher = FileWatcher(keyFile.toFile())

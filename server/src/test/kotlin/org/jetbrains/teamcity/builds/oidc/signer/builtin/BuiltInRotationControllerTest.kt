@@ -1,5 +1,6 @@
 package org.jetbrains.teamcity.builds.oidc.signer.builtin
 
+import jetbrains.buildServer.serverSide.ServerResponsibility
 import jetbrains.buildServer.serverSide.auth.Permission
 import jetbrains.buildServer.users.SUser
 import jetbrains.buildServer.web.openapi.WebControllerManager
@@ -14,6 +15,7 @@ import javax.servlet.http.HttpServletResponse
 
 class BuiltInRotationControllerTest : BaseTestCase() {
     private lateinit var controllerManager: WebControllerManager
+    private lateinit var serverResponsibility: ServerResponsibility
     private lateinit var signer: AbstractFileBasedJWTSigner<*>
     private lateinit var request: HttpServletRequest
     private lateinit var response: HttpServletResponse
@@ -24,6 +26,9 @@ class BuiltInRotationControllerTest : BaseTestCase() {
     override fun setUp() {
         super.setUp()
         controllerManager = mockk(relaxed = true)
+        serverResponsibility = mockk {
+            every { canProcessUserDataModificationRequests() } returns true
+        }
         signer = mockk {
             every { id } returns "builtin-rsa"
         }
@@ -31,7 +36,7 @@ class BuiltInRotationControllerTest : BaseTestCase() {
         response = mockk()
         xmlResponse = Element("response")
 
-        controller = BuiltInRotationController(controllerManager, signer)
+        controller = BuiltInRotationController(controllerManager, serverResponsibility, signer)
     }
 
     private fun mockAuthorizedUser(): SUser = mockk {
@@ -88,6 +93,16 @@ class BuiltInRotationControllerTest : BaseTestCase() {
     fun doGet_returnsNull() {
         val result: Any? = controller.doGet(request, response)
         Assertions.assertThat(result).isNull()
+    }
+
+    @Test
+    fun doPost_nodeCannotProcessUserDataModifications_doesNotRotateAndReturnsError() {
+        every { serverResponsibility.canProcessUserDataModificationRequests() } returns false
+
+        controller.doPost(request, response, xmlResponse)
+
+        verify(exactly = 0) { signer.rotateKey() }
+        assertHasError(xmlResponse, "rotation", "cannot rotate keys")
     }
 
     @Test
