@@ -14,6 +14,7 @@ import jetbrains.buildServer.configuration.FileWatcher
 import jetbrains.buildServer.serverSide.IOGuard
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.ServerPaths
+import jetbrains.buildServer.serverSide.ServerResponsibility
 import jetbrains.buildServer.serverSide.crypt.Encryption
 import jetbrains.buildServer.web.openapi.PluginDescriptor
 import jetbrains.buildServer.web.openapi.WebControllerManager
@@ -34,6 +35,7 @@ import kotlin.concurrent.write
  */
 abstract class AbstractFileBasedJWTSigner<K : JWK>(
     controllerManager: WebControllerManager,
+    private val serverResponsibility: ServerResponsibility,
     serverPaths: ServerPaths,
     private val encryption: Encryption,
     private val pluginDescriptor: PluginDescriptor,
@@ -55,7 +57,6 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
     private val rotationController = BuiltInRotationController(controllerManager, this)
 
     init {
-        Files.createDirectories(keyDir)
         fileWatcher = FileWatcher(keyFile.toFile())
         fileWatcher.registerListener(this)
         fileWatcher.start()
@@ -93,7 +94,7 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
         Files.writeString(path, encrypted)
     }
 
-    protected fun getKey(generateIfMissing: Boolean = true): K? {
+    protected fun getKey(generateIfMissing: Boolean): K? {
         keyLock.read {
             cachedKey?.let { return it }
         }
@@ -104,6 +105,9 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
             try {
                 val key = loadKey()
                     ?: if (generateIfMissing) {
+                        if (!serverResponsibility.canManageBuilds()) {
+                            throw JWTSignerException("Cannot generate signing key: server is not configured to manage builds")
+                        }
                         generateKey().also { saveKey(it, keyFile) }
                     } else null
                 cachedKey = key
@@ -134,7 +138,7 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
 
     override fun makeJWT(build: SBuild, claimsJSON: ByteArray, expiresAt: Instant): String {
         try {
-            val key = getKey()!!
+            val key = getKey(generateIfMissing = true) ?: throw JWTSignerException("Cannot load or generate key")
             val header = JWSHeader.Builder(getSigningAlgorithm())
                 .keyID(key.keyID)
                 .build()
@@ -151,7 +155,12 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
 
     override fun getJWKS(): String {
         try {
-            val keySet = mutableSetOf(currentKeyPublicJWK)
+            val current = getCurrentKeyPublicJWK()
+            val keySet = if (!current.isBlank()) {
+                mutableSetOf(current)
+            } else {
+                mutableSetOf()
+            }
             keySet.addAll(jwkCache.fetchCachedJWKs().values)
             return """{"keys":[${keySet.joinToString(",")}]}"""
         } catch (e: JWTSignerException) {
@@ -163,7 +172,7 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
 
     override fun getCurrentKeyPublicJWK(): String {
         try {
-            return getKey()!!.toPublicJWK().toJSONString()
+            return getKey(generateIfMissing = false)?.toPublicJWK()?.toJSONString() ?: ""
         } catch (e: JWTSignerException) {
             throw e
         } catch (e: Exception) {
@@ -176,7 +185,7 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
 
     override fun fillSettingsModel(model: MutableMap<String, Any>) {
         model["keyFilePath"] = keyFile.toString()
-        model["keyFingerprint"] = getKey()!!.keyID
+        model["keyFingerprint"] = getKey(generateIfMissing = false)?.keyID ?: "<will be generated on first use>"
         model["rotationEndpoint"] = rotationController.rotationURL()
         model["rotationRequiredPermission"] = rotationController.requiredPermission()
     }

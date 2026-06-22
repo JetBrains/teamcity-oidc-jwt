@@ -15,6 +15,7 @@ import com.nimbusds.jose.jwk.Curve
 import com.nimbusds.jose.jwk.ECKey
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator
 import jetbrains.buildServer.serverSide.ServerPaths
+import jetbrains.buildServer.serverSide.ServerResponsibility
 import jetbrains.buildServer.serverSide.crypt.Encryption
 import jetbrains.buildServer.util.Cached
 import jetbrains.buildServer.web.openapi.PluginDescriptor
@@ -28,6 +29,7 @@ import kotlin.concurrent.write
  */
 class BuiltInECDSASigner(
     controllerManager: WebControllerManager,
+    serverResponsibility: ServerResponsibility,
     serverPaths: ServerPaths,
     encryption: Encryption,
     pluginDescriptor: PluginDescriptor,
@@ -35,6 +37,7 @@ class BuiltInECDSASigner(
     jwkCache: JWKCache,
 ) : AbstractFileBasedJWTSigner<ECKey>(
     controllerManager,
+    serverResponsibility,
     serverPaths,
     encryption,
     pluginDescriptor,

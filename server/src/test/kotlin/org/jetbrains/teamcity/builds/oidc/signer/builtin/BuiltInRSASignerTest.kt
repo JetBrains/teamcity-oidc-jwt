@@ -7,6 +7,7 @@ import com.nimbusds.jose.jwk.JWKSet
 import com.nimbusds.jose.jwk.RSAKey
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.ServerPaths
+import jetbrains.buildServer.serverSide.ServerResponsibility
 import jetbrains.buildServer.serverSide.auth.Permission
 import jetbrains.buildServer.serverSide.crypt.Encryption
 import jetbrains.buildServer.web.openapi.PluginDescriptor
@@ -36,6 +37,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
     private lateinit var settingsStore: BuiltInRSASettingsStore
     private lateinit var jwkCache: JWKCache
     private lateinit var serverPaths: ServerPaths
+    private lateinit var serverResponsibility: ServerResponsibility
     private var currentSettings = BuiltInRSASettings()
     private val settingsUpdateHandlers = mutableListOf<() -> Unit>()
     private var signer: BuiltInRSASigner? = null
@@ -80,6 +82,10 @@ class BuiltInRSASignerTest : BaseTestCase() {
         serverPaths = mockk {
             every { pluginDataDirectory } returns tempDir.resolve("pluginData").toFile()
         }
+
+        serverResponsibility = mockk {
+            every { canManageBuilds() } returns true
+        }
     }
 
     @AfterMethod
@@ -98,7 +104,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
     }
 
     private fun createSigner(): BuiltInRSASigner {
-        val s = BuiltInRSASigner(controllerManager, serverPaths, encryption, pluginDescriptor, settingsStore, jwkCache)
+        val s = BuiltInRSASigner(controllerManager, serverResponsibility, serverPaths, encryption, pluginDescriptor, settingsStore, jwkCache)
         signer = s
         return s
     }
@@ -321,19 +327,20 @@ class BuiltInRSASignerTest : BaseTestCase() {
     @Test
     fun getJWKS_returnsValidJWKSJSON() {
         val signer = createSigner()
+        makeSimpleJWT(signer)
         val jwks = JWKSet.parse(signer.getJWKS())
         Assertions.assertThat(jwks.keys).hasSize(1)
         Assertions.assertThat(jwks.keys[0].keyType.value).isEqualTo("RSA")
     }
 
     @Test
-    fun getJWKS_generatesKeyIfMissing() {
+    fun getJWKS_doesNotGenerateKeyIfMissing() {
         val signer = createSigner()
         Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
 
         val jwks = signer.getJWKS()
-        Assertions.assertThat(jwks).isNotEmpty()
-        Assertions.assertThat(Files.exists(keyFilePath())).isTrue()
+        Assertions.assertThat(JWKSet.parse(jwks).keys).isEmpty()
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
     }
 
     @Test
@@ -915,20 +922,18 @@ class BuiltInRSASignerTest : BaseTestCase() {
      */
 
     @Test
-    fun getCurrentKeyPublicJWK_generatesKeyIfMissing_returnsValidPublicJWK() {
+    fun getCurrentKeyPublicJWK_doesNotGenerateKeyIfMissing_returnsEmpty() {
         val signer = createSigner()
         Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
 
-        val jwk = RSAKey.parse(signer.getCurrentKeyPublicJWK())
-
-        Assertions.assertThat(Files.exists(keyFilePath())).isTrue()
-        Assertions.assertThat(jwk.keyType.value).isEqualTo("RSA")
-        Assertions.assertThat(jwk.keyID).isNotEmpty()
+        Assertions.assertThat(signer.getCurrentKeyPublicJWK()).isEmpty()
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
     }
 
     @Test
     fun getCurrentKeyPublicJWK_returnsOnlyPublicComponents() {
         val signer = createSigner()
+        makeSimpleJWT(signer)
         val json = RSAKey.parse(signer.getCurrentKeyPublicJWK()).toJSONObject()
 
         Assertions.assertThat(json["d"]).isNull()
@@ -974,5 +979,84 @@ class BuiltInRSASignerTest : BaseTestCase() {
             JWTSignerException::class.java
         )
         Assertions.assertThat(ex.message).contains("Failed to load or generate signing key")
+    }
+
+    /*
+     * Secondary node / build-management capability
+     */
+
+    @Test
+    fun makeJWT_withoutBuildManagementCapability_throwsAndDoesNotGenerate() {
+        every { serverResponsibility.canManageBuilds() } returns false
+        val signer = createSigner()
+
+        val ex = Assertions.catchThrowableOfType(
+            { makeSimpleJWT(signer) },
+            JWTSignerException::class.java
+        )
+        // getKey wraps the capability error, so the specific message lives in the cause chain.
+        Assertions.assertThat(ex).hasStackTraceContaining("not configured to manage builds")
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+        verify(exactly = 0) { jwkCache.trackKey(any(), any(), any()) }
+    }
+
+    @Test
+    fun makeJWT_nullKey_throwsJWTSignerException() {
+        val signer = spyk(createSigner())
+        every { signer["getKey"](any<Boolean>()) } returns null
+
+        val ex = Assertions.catchThrowableOfType(
+            { makeSimpleJWT(signer) },
+            JWTSignerException::class.java
+        )
+        Assertions.assertThat(ex.message).contains("Cannot load or generate key")
+    }
+
+    @Test
+    fun getJWKS_withoutBuildManagementCapability_returnsEmptyAndDoesNotGenerate() {
+        every { serverResponsibility.canManageBuilds() } returns false
+        val signer = createSigner()
+
+        val jwks = signer.getJWKS()
+        Assertions.assertThat(JWKSet.parse(jwks).keys).isEmpty()
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+    }
+
+    @Test
+    fun fillSettingsModel_noKey_showsWillBeGeneratedPlaceholder() {
+        val signer = createSigner()
+        val model = mutableMapOf<String, Any>()
+        signer.fillSettingsModel(model)
+
+        Assertions.assertThat(model["keyFingerprint"]).isEqualTo("<will be generated on first use>")
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+    }
+
+    @Test
+    fun fillSettingsModel_withoutBuildManagementCapability_doesNotThrow() {
+        every { serverResponsibility.canManageBuilds() } returns false
+        val signer = createSigner()
+        val model = mutableMapOf<String, Any>()
+        signer.fillSettingsModel(model)
+
+        Assertions.assertThat(model["keyFingerprint"]).isEqualTo("<will be generated on first use>")
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+    }
+
+    @Test
+    fun rotateKey_withoutBuildManagementCapability_stillRotates() {
+        // Generate a key while the node can still manage builds.
+        val signer = createSigner()
+        makeSimpleJWT(signer)
+
+        // Drop the capability: rotation (triggered by a key-bits change) must still
+        // proceed -- it only backs up and deletes the current key, never generates one.
+        every { serverResponsibility.canManageBuilds() } returns false
+
+        signer.saveSettings(mutableMapOf("rsaKeyBits" to "4096", "jwsAlgorithm" to "RS256"))
+
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+        val rotatedFiles = listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
+        Assertions.assertThat(rotatedFiles).hasSize(1)
     }
 }

@@ -15,6 +15,7 @@ import com.nimbusds.jose.JWSSigner
 import com.nimbusds.jose.crypto.RSASSASigner
 import com.nimbusds.jose.jwk.RSAKey
 import jetbrains.buildServer.serverSide.ServerPaths
+import jetbrains.buildServer.serverSide.ServerResponsibility
 import jetbrains.buildServer.serverSide.crypt.Encryption
 import jetbrains.buildServer.util.Cached
 import jetbrains.buildServer.web.openapi.PluginDescriptor
@@ -30,6 +31,7 @@ import kotlin.concurrent.write
  */
 class BuiltInRSASigner(
     controllerManager: WebControllerManager,
+    serverResponsibility: ServerResponsibility,
     serverPaths: ServerPaths,
     encryption: Encryption,
     pluginDescriptor: PluginDescriptor,
@@ -37,6 +39,7 @@ class BuiltInRSASigner(
     jwkCache: JWKCache,
     ) : AbstractFileBasedJWTSigner<RSAKey>(
     controllerManager,
+    serverResponsibility,
     serverPaths,
     encryption,
     pluginDescriptor,
