@@ -30,6 +30,8 @@ object OIDCConstants {
 
         const val SETTINGS_RSA_KEY_BITS_ATTR = "rsaKeyBits"
         const val SETTINGS_JWS_ALGORITHM_ATTR = "jwsAlgorithm"
+
+        const val ROTATE_TASK_TYPE = "oidc-jwt-rotate-key-rsa"
     }
 
     object BuiltInECDSASigner {
@@ -50,6 +52,8 @@ object OIDCConstants {
         const val SETTINGS_PERSIST_DESCRIPTION = "Save OIDC plugin built-in ECDSA signer settings"
 
         const val SETTINGS_JWS_ALGORITHM_ATTR = "jwsAlgorithm"
+
+        const val ROTATE_TASK_TYPE = "oidc-jwt-rotate-key-ecdsa"
     }
 
     object BuiltInRotationController {

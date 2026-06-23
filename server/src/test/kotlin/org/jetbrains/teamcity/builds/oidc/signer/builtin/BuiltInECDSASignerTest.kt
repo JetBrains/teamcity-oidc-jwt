@@ -7,6 +7,7 @@ import com.nimbusds.jose.jwk.Curve
 import com.nimbusds.jose.jwk.ECKey
 import com.nimbusds.jose.jwk.JWKSet
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator
+import jetbrains.buildServer.serverSide.MultiNodeTasks
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.ServerPaths
 import jetbrains.buildServer.serverSide.ServerResponsibility
@@ -39,6 +40,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     private lateinit var serverPaths: ServerPaths
     private lateinit var serverResponsibility: ServerResponsibility
     private lateinit var teamCityNodes: TeamCityNodes
+    private lateinit var multiNodeTasks: MultiNodeTasks
     private var currentSettings = BuiltInECDSASettings()
     private val settingsUpdateHandlers = mutableListOf<() -> Unit>()
     private var signer: BuiltInECDSASigner? = null
@@ -91,6 +93,8 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         teamCityNodes = mockk {
             every { currentNode.id } returns "test-node-1"
         }
+
+        multiNodeTasks = mockk(relaxed = true)
     }
 
     @AfterMethod
@@ -116,11 +120,24 @@ class BuiltInECDSASignerTest : BaseTestCase() {
             serverPaths,
             encryption,
             pluginDescriptor,
+            multiNodeTasks,
             settingsStore,
             jwkCache
         )
         signer = s
         return s
+    }
+
+    private fun captureRotationConsumer(): MultiNodeTasks.TaskConsumer {
+        val slot = slot<MultiNodeTasks.TaskConsumer>()
+        verify { multiNodeTasks.subscribeOnSingletonTask(any(), capture(slot)) }
+        return slot.captured
+    }
+
+    private fun driveRotationTask(consumer: MultiNodeTasks.TaskConsumer) {
+        // Honor the framework contract: accept() runs only if beforeAccept() is true.
+        val task = mockk<MultiNodeTasks.PerformingTask>(relaxed = true)
+        if (consumer.beforeAccept(task)) consumer.accept(task)
     }
 
     private fun makeSimpleJWT(target: BuiltInECDSASigner): String {
@@ -964,5 +981,53 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
         val rotatedFiles = listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
         Assertions.assertThat(rotatedFiles).hasSize(1)
+    }
+
+    /*
+     * Multi-node rotation task
+     */
+
+    @Test
+    fun init_subscribesToRotationTask() {
+        createSigner()
+        verify(exactly = 1) {
+            multiNodeTasks.subscribeOnSingletonTask(eq("oidc-jwt-rotate-key-ecdsa"), any())
+        }
+    }
+
+    @Test
+    fun destroy_unsubscribesFromRotationTask() {
+        val signer = createSigner()
+        signer.destroy()
+        this.signer = null // avoid a second destroy() in tearDown
+        verify(exactly = 1) { multiNodeTasks.unsubscribe(eq("oidc-jwt-rotate-key-ecdsa")) }
+    }
+
+    @Test
+    fun rotationTask_withBuildManagementCapability_rotatesKey() {
+        val signer = createSigner()
+        makeSimpleJWT(signer) // generate current key (capability = true)
+
+        driveRotationTask(captureRotationConsumer())
+
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+        Assertions.assertThat(
+            listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
+        ).hasSize(1)
+    }
+
+    @Test
+    fun rotationTask_withoutBuildManagementCapability_doesNotRotate() {
+        val signer = createSigner()
+        makeSimpleJWT(signer) // generate key while capability = true
+
+        every { serverResponsibility.canManageBuilds() } returns false
+
+        driveRotationTask(captureRotationConsumer())
+
+        Assertions.assertThat(Files.exists(keyFilePath())).isTrue()
+        Assertions.assertThat(
+            listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
+        ).isEmpty()
     }
 }

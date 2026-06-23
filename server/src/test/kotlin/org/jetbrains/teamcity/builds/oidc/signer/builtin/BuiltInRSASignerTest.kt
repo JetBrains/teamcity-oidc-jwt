@@ -5,6 +5,7 @@ import com.nimbusds.jose.JWSObject
 import com.nimbusds.jose.crypto.RSASSAVerifier
 import com.nimbusds.jose.jwk.JWKSet
 import com.nimbusds.jose.jwk.RSAKey
+import jetbrains.buildServer.serverSide.MultiNodeTasks
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.ServerPaths
 import jetbrains.buildServer.serverSide.ServerResponsibility
@@ -40,6 +41,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
     private lateinit var serverPaths: ServerPaths
     private lateinit var serverResponsibility: ServerResponsibility
     private lateinit var teamCityNodes: TeamCityNodes
+    private lateinit var multiNodeTasks: MultiNodeTasks
     private var currentSettings = BuiltInRSASettings()
     private val settingsUpdateHandlers = mutableListOf<() -> Unit>()
     private var signer: BuiltInRSASigner? = null
@@ -92,6 +94,8 @@ class BuiltInRSASignerTest : BaseTestCase() {
         teamCityNodes = mockk {
             every { currentNode.id } returns "test-node-1"
         }
+
+        multiNodeTasks = mockk(relaxed = true)
     }
 
     @AfterMethod
@@ -110,9 +114,31 @@ class BuiltInRSASignerTest : BaseTestCase() {
     }
 
     private fun createSigner(): BuiltInRSASigner {
-        val s = BuiltInRSASigner(controllerManager, teamCityNodes, serverResponsibility, serverPaths, encryption, pluginDescriptor, settingsStore, jwkCache)
+        val s = BuiltInRSASigner(
+            controllerManager,
+            teamCityNodes,
+            serverResponsibility,
+            serverPaths,
+            encryption,
+            pluginDescriptor,
+            multiNodeTasks,
+            settingsStore,
+            jwkCache
+        )
         signer = s
         return s
+    }
+
+    private fun captureRotationConsumer(): MultiNodeTasks.TaskConsumer {
+        val slot = slot<MultiNodeTasks.TaskConsumer>()
+        verify { multiNodeTasks.subscribeOnSingletonTask(any(), capture(slot)) }
+        return slot.captured
+    }
+
+    private fun driveRotationTask(consumer: MultiNodeTasks.TaskConsumer) {
+        // Honor the framework contract: accept() runs only if beforeAccept() is true.
+        val task = mockk<MultiNodeTasks.PerformingTask>(relaxed = true)
+        if (consumer.beforeAccept(task)) consumer.accept(task)
     }
 
     private fun makeSimpleJWT(target: BuiltInRSASigner): String {
@@ -1064,5 +1090,53 @@ class BuiltInRSASignerTest : BaseTestCase() {
         Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
         val rotatedFiles = listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
         Assertions.assertThat(rotatedFiles).hasSize(1)
+    }
+
+    /*
+     * Multi-node rotation task
+     */
+
+    @Test
+    fun init_subscribesToRotationTask() {
+        createSigner()
+        verify(exactly = 1) {
+            multiNodeTasks.subscribeOnSingletonTask(eq("oidc-jwt-rotate-key-rsa"), any())
+        }
+    }
+
+    @Test
+    fun destroy_unsubscribesFromRotationTask() {
+        val signer = createSigner()
+        signer.destroy()
+        this.signer = null // avoid a second destroy() in tearDown
+        verify(exactly = 1) { multiNodeTasks.unsubscribe(eq("oidc-jwt-rotate-key-rsa")) }
+    }
+
+    @Test
+    fun rotationTask_withBuildManagementCapability_rotatesKey() {
+        val signer = createSigner()
+        makeSimpleJWT(signer) // generate current key (capability = true)
+
+        driveRotationTask(captureRotationConsumer())
+
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+        Assertions.assertThat(
+            listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
+        ).hasSize(1)
+    }
+
+    @Test
+    fun rotationTask_withoutBuildManagementCapability_doesNotRotate() {
+        val signer = createSigner()
+        makeSimpleJWT(signer) // generate key while capability = true
+
+        every { serverResponsibility.canManageBuilds() } returns false
+
+        driveRotationTask(captureRotationConsumer())
+
+        Assertions.assertThat(Files.exists(keyFilePath())).isTrue()
+        Assertions.assertThat(
+            listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
+        ).isEmpty()
     }
 }

@@ -1,5 +1,6 @@
 package org.jetbrains.teamcity.builds.oidc.signer.builtin
 
+import com.intellij.openapi.diagnostic.Logger
 import org.jetbrains.teamcity.builds.oidc.api.JWTSigner
 import org.jetbrains.teamcity.builds.oidc.api.JWTSignerAdminSettings
 import org.jetbrains.teamcity.builds.oidc.api.JWTSignerException
@@ -11,7 +12,9 @@ import com.nimbusds.jose.Payload
 import com.nimbusds.jose.jwk.JWK
 import jetbrains.buildServer.configuration.ChangeListener
 import jetbrains.buildServer.configuration.FileWatcher
+import jetbrains.buildServer.log.Loggers
 import jetbrains.buildServer.serverSide.IOGuard
+import jetbrains.buildServer.serverSide.MultiNodeTasks
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.ServerPaths
 import jetbrains.buildServer.serverSide.ServerResponsibility
@@ -41,11 +44,13 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
     serverPaths: ServerPaths,
     private val encryption: Encryption,
     private val pluginDescriptor: PluginDescriptor,
+    private val multiNodeTasks: MultiNodeTasks,
     private val jwkCache: JWKCache,
     keyRoot: String,
     keySubdir: String,
     keyFileName: String,
     private val settingsJsp: String,
+    private val rotationTaskType: String,
 ) : JWTSigner, JWTSignerAdminSettings, ChangeListener, DisposableBean {
 
     protected val keyDir: Path = serverPaths.pluginDataDirectory.toPath().resolve(keyRoot).resolve(keySubdir)
@@ -62,6 +67,8 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
         fileWatcher = FileWatcher(keyFile.toFile())
         fileWatcher.registerListener(this)
         fileWatcher.start()
+
+        multiNodeTasks.subscribeOnSingletonTask(rotationTaskType, RotationTaskConsumer())
     }
 
     /** JWS algorithm to use and advertise. */
@@ -201,5 +208,24 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
         fileWatcher.unregisterListener(this)
         fileWatcher.stop()
         fileWatcher.clear()
+
+        multiNodeTasks.unsubscribe(rotationTaskType)
+    }
+
+    private inner class RotationTaskConsumer: MultiNodeTasks.TaskConsumer() {
+        private val log: Logger = Logger.getInstance(Loggers.SERVER_CATEGORY + "." + this::class.java.name + "#" + rotationTaskType)
+
+        override fun beforeAccept(task: MultiNodeTasks.PerformingTask): Boolean {
+            return serverResponsibility.canManageBuilds()
+        }
+
+        override fun accept(t: MultiNodeTasks.PerformingTask?) {
+            try {
+                rotateKey()
+                t?.finished()
+            } catch (e: Exception) {
+                log.warnAndDebugDetails("Failed to rotate the key", e)
+            }
+        }
     }
 }

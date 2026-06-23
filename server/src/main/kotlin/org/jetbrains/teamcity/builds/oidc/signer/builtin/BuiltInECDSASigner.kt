@@ -14,6 +14,7 @@ import com.nimbusds.jose.crypto.ECDSASigner
 import com.nimbusds.jose.jwk.Curve
 import com.nimbusds.jose.jwk.ECKey
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator
+import jetbrains.buildServer.serverSide.MultiNodeTasks
 import jetbrains.buildServer.serverSide.ServerPaths
 import jetbrains.buildServer.serverSide.ServerResponsibility
 import jetbrains.buildServer.serverSide.TeamCityNodes
@@ -35,6 +36,7 @@ class BuiltInECDSASigner(
     serverPaths: ServerPaths,
     encryption: Encryption,
     pluginDescriptor: PluginDescriptor,
+    multiNodeTasks: MultiNodeTasks,
     private val settingsStore: BuiltInECDSASettingsStore,
     jwkCache: JWKCache,
 ) : AbstractFileBasedJWTSigner<ECKey>(
@@ -44,11 +46,13 @@ class BuiltInECDSASigner(
     serverPaths,
     encryption,
     pluginDescriptor,
+    multiNodeTasks,
     jwkCache,
     keyRoot = KEY_ROOT,
     keySubdir = KEY_SUBDIR,
     keyFileName = PRIVATE_KEY_NAME,
     settingsJsp = SETTINGS_JSP,
+    rotationTaskType = OIDCConstants.BuiltInECDSASigner.ROTATE_TASK_TYPE,
 ) {
     override fun getId(): String = OIDCConstants.BuiltInECDSASigner.ID
     override fun getDisplayName(): String = OIDCConstants.BuiltInECDSASigner.DISPLAY_NAME

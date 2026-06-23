@@ -14,6 +14,7 @@ import com.nimbusds.jose.JWSAlgorithm
 import com.nimbusds.jose.JWSSigner
 import com.nimbusds.jose.crypto.RSASSASigner
 import com.nimbusds.jose.jwk.RSAKey
+import jetbrains.buildServer.serverSide.MultiNodeTasks
 import jetbrains.buildServer.serverSide.ServerPaths
 import jetbrains.buildServer.serverSide.ServerResponsibility
 import jetbrains.buildServer.serverSide.TeamCityNodes
@@ -37,6 +38,7 @@ class BuiltInRSASigner(
     serverPaths: ServerPaths,
     encryption: Encryption,
     pluginDescriptor: PluginDescriptor,
+    multiNodeTasks: MultiNodeTasks,
     private val settingsStore: BuiltInRSASettingsStore,
     jwkCache: JWKCache,
     ) : AbstractFileBasedJWTSigner<RSAKey>(
@@ -46,11 +48,13 @@ class BuiltInRSASigner(
     serverPaths,
     encryption,
     pluginDescriptor,
+    multiNodeTasks,
     jwkCache,
     keyRoot = KEY_ROOT,
     keySubdir = KEY_SUBDIR,
     keyFileName = PRIVATE_KEY_NAME,
     settingsJsp = SETTINGS_JSP,
+    rotationTaskType = OIDCConstants.BuiltInRSASigner.ROTATE_TASK_TYPE,
 ) {
     override fun getId(): String = OIDCConstants.BuiltInRSASigner.ID
     override fun getDisplayName(): String = OIDCConstants.BuiltInRSASigner.DISPLAY_NAME
