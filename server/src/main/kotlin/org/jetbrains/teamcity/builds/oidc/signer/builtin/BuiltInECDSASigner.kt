@@ -113,10 +113,8 @@ class BuiltInECDSASigner(
 
         if (jwsAlgorithm == settingsStore.get().jwsAlgorithm) return emptyMap()
 
-        keyLock.write {
-            settingsStore.save(BuiltInECDSASettings(jwsAlgorithm = jwsAlgorithm))
-            rotateKey()
-        }
+        settingsStore.save(BuiltInECDSASettings(jwsAlgorithm = jwsAlgorithm))
+        requestKeyRotation()
 
         return emptyMap()
     }

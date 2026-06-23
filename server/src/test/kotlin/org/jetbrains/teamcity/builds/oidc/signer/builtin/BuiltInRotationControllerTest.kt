@@ -1,6 +1,5 @@
 package org.jetbrains.teamcity.builds.oidc.signer.builtin
 
-import jetbrains.buildServer.serverSide.ServerResponsibility
 import jetbrains.buildServer.serverSide.auth.Permission
 import jetbrains.buildServer.users.SUser
 import jetbrains.buildServer.web.openapi.WebControllerManager
@@ -15,7 +14,6 @@ import javax.servlet.http.HttpServletResponse
 
 class BuiltInRotationControllerTest : BaseTestCase() {
     private lateinit var controllerManager: WebControllerManager
-    private lateinit var serverResponsibility: ServerResponsibility
     private lateinit var signer: AbstractFileBasedJWTSigner<*>
     private lateinit var request: HttpServletRequest
     private lateinit var response: HttpServletResponse
@@ -26,9 +24,6 @@ class BuiltInRotationControllerTest : BaseTestCase() {
     override fun setUp() {
         super.setUp()
         controllerManager = mockk(relaxed = true)
-        serverResponsibility = mockk {
-            every { canProcessUserDataModificationRequests() } returns true
-        }
         signer = mockk {
             every { id } returns "builtin-rsa"
         }
@@ -36,7 +31,7 @@ class BuiltInRotationControllerTest : BaseTestCase() {
         response = mockk()
         xmlResponse = Element("response")
 
-        controller = BuiltInRotationController(controllerManager, serverResponsibility, signer)
+        controller = BuiltInRotationController(controllerManager, signer)
     }
 
     private fun mockAuthorizedUser(): SUser = mockk {
@@ -96,50 +91,40 @@ class BuiltInRotationControllerTest : BaseTestCase() {
     }
 
     @Test
-    fun doPost_nodeCannotProcessUserDataModifications_doesNotRotateAndReturnsError() {
-        every { serverResponsibility.canProcessUserDataModificationRequests() } returns false
-
-        controller.doPost(request, response, xmlResponse)
-
-        verify(exactly = 0) { signer.rotateKey() }
-        assertHasError(xmlResponse, "rotation", "cannot rotate keys")
-    }
-
-    @Test
-    fun doPost_nullUser_doesNotRotateAndReturnsError() {
+    fun doPost_nullUser_doesNotRequestRotationAndReturnsError() {
         stubSessionUser(null)
 
         controller.doPost(request, response, xmlResponse)
 
-        verify(exactly = 0) { signer.rotateKey() }
+        verify(exactly = 0) { signer.requestKeyRotation() }
         assertHasError(xmlResponse, "rotation", "permission")
     }
 
     @Test
-    fun doPost_userWithoutPermission_doesNotRotateAndReturnsError() {
+    fun doPost_userWithoutPermission_doesNotRequestRotationAndReturnsError() {
         stubSessionUser(mockUnauthorizedUser())
 
         controller.doPost(request, response, xmlResponse)
 
-        verify(exactly = 0) { signer.rotateKey() }
+        verify(exactly = 0) { signer.requestKeyRotation() }
         assertHasError(xmlResponse, "rotation", "permission")
     }
 
     @Test
-    fun doPost_authorizedUser_rotatesKeyAndReturnsNoErrors() {
+    fun doPost_authorizedUser_requestsRotationAndReturnsNoErrors() {
         stubSessionUser(mockAuthorizedUser())
-        every { signer.rotateKey() } just Runs
+        every { signer.requestKeyRotation() } just Runs
 
         controller.doPost(request, response, xmlResponse)
 
-        verify(exactly = 1) { signer.rotateKey() }
+        verify(exactly = 1) { signer.requestKeyRotation() }
         assertNoErrors(xmlResponse)
     }
 
     @Test
-    fun doPost_rotateThrows_returnsError() {
+    fun doPost_requestRotationThrows_returnsError() {
         stubSessionUser(mockAuthorizedUser())
-        every { signer.rotateKey() } throws RuntimeException("disk full")
+        every { signer.requestKeyRotation() } throws RuntimeException("disk full")
 
         controller.doPost(request, response, xmlResponse)
 
@@ -148,13 +133,13 @@ class BuiltInRotationControllerTest : BaseTestCase() {
     }
 
     @Test
-    fun doPost_rotateThrowsWithoutMessage_returnsGenericError() {
+    fun doPost_requestRotationThrowsWithoutMessage_returnsGenericError() {
         stubSessionUser(mockAuthorizedUser())
-        every { signer.rotateKey() } throws RuntimeException()
+        every { signer.requestKeyRotation() } throws RuntimeException()
 
         controller.doPost(request, response, xmlResponse)
 
-        assertHasError(xmlResponse, "rotation", "Rotation failed")
+        assertHasError(xmlResponse, "rotation", "Rotation scheduling failed")
         clearFailure()
     }
 }

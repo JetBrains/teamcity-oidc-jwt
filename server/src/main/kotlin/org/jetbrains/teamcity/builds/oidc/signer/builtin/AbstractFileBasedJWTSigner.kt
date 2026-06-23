@@ -22,6 +22,7 @@ import jetbrains.buildServer.serverSide.TeamCityNodes
 import jetbrains.buildServer.serverSide.crypt.Encryption
 import jetbrains.buildServer.web.openapi.PluginDescriptor
 import jetbrains.buildServer.web.openapi.WebControllerManager
+import org.jetbrains.teamcity.builds.oidc.OIDCConstants.AbstractSigner.KEY_ROTATION_TASK_FINISH_THRESHOLD_MS
 import org.jetbrains.teamcity.builds.oidc.api.JWKCache
 import org.springframework.beans.factory.DisposableBean
 import java.nio.file.Files
@@ -61,7 +62,7 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
 
     protected val fileWatcher: FileWatcher
 
-    private val rotationController = BuiltInRotationController(controllerManager, serverResponsibility, this)
+    private val rotationController = BuiltInRotationController(controllerManager, this)
 
     init {
         fileWatcher = FileWatcher(keyFile.toFile())
@@ -129,7 +130,7 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
         }
     }
 
-    internal fun rotateKey() {
+    private fun rotateKey() {
         // Get the current key if exists, do not generate a new one
         val currentKey = getKey(generateIfMissing = false)
         val keySize = getKeySize(currentKey) ?: "unknown"
@@ -145,6 +146,29 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
                 cachedKey = null
             }
         }
+    }
+
+    fun requestKeyRotation() {
+        val currentKey = keyLock.write {
+            // Reset the cache to get a fresh key ID
+            cachedKey = null
+            getKey(generateIfMissing = false)
+        }
+
+        val currentKeyID = currentKey?.keyID ?: return
+        if (isKeyRotationInProgress(currentKeyID)) {
+            throw JWTSignerException("Key rotation $currentKeyID is already in progress.")
+        }
+
+        multiNodeTasks.submit(MultiNodeTasks.TaskData(rotationTaskType, currentKeyID))
+    }
+
+    fun isKeyRotationInProgress(currentKey: String?): Boolean {
+        val taskType = listOf(rotationTaskType)
+        val processingTasks = (multiNodeTasks.findPendingTasks(taskType)
+                + multiNodeTasks.findInProgressTasks(taskType)
+                + multiNodeTasks.findFinishedTasks(taskType, KEY_ROTATION_TASK_FINISH_THRESHOLD_MS))
+        return processingTasks.any { it.identity == currentKey }
     }
 
     override fun makeJWT(build: SBuild, claimsJSON: ByteArray, expiresAt: Instant): String {
@@ -196,7 +220,14 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
 
     override fun fillSettingsModel(model: MutableMap<String, Any>) {
         model["keyFilePath"] = keyFile.toString()
-        model["keyFingerprint"] = getKey(generateIfMissing = false)?.keyID ?: "<will be generated on first use>"
+        var keyFingerprint = getKey(generateIfMissing = false)?.keyID
+        if (keyFingerprint != null) {
+            val rotating = isKeyRotationInProgress(keyFingerprint)
+            if (rotating) {
+                keyFingerprint += " (rotation in progress)"
+            }
+        }
+        model["keyFingerprint"] = keyFingerprint ?: "<will be generated on first use>"
         model["rotationEndpoint"] = rotationController.rotationURL()
         model["rotationRequiredPermission"] = rotationController.requiredPermission()
     }

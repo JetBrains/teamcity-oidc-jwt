@@ -141,11 +141,9 @@ class BuiltInRSASigner(
         if (!bitsChanged && !algorithmChanged) return emptyMap()
 
         val newSettings = BuiltInRSASettings(jwsAlgorithm = jwsAlgorithm, rsaKeyBits = rsaKeyBits)
-        keyLock.write {
-            settingsStore.save(newSettings)
-            if (bitsChanged) {
-                rotateKey()
-            }
+        settingsStore.save(newSettings)
+        if (bitsChanged) {
+            requestKeyRotation()
         }
 
         return emptyMap()
