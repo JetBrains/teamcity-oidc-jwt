@@ -30,11 +30,12 @@ class OIDCOnDemandTokenIssuerControllerTest : BaseTestCase() {
         }
     }
 
-    private fun createOnDemandDescriptor(audiences: String? = null): SBuildFeatureDescriptor {
+    private fun createOnDemandDescriptor(id: String, audiences: String? = null): SBuildFeatureDescriptor {
         val params = mutableMapOf<String, String>()
         if (audiences != null) params["audiences"] = audiences
         return mockk<SBuildFeatureDescriptor> {
             every { parameters } returns params
+            every { getId() } returns id
         }
     }
 
@@ -105,7 +106,7 @@ class OIDCOnDemandTokenIssuerControllerTest : BaseTestCase() {
         buildId: Long = 1L,
         projectId: String = "project1",
         effectiveIssuer: String = "https://issuer.example.com",
-        onDemandFeatures: List<SBuildFeatureDescriptor> = listOf(createOnDemandDescriptor()),
+        onDemandFeatures: List<SBuildFeatureDescriptor> = listOf(createOnDemandDescriptor(id = "feature")),
         signer: JWTSigner = mockk<JWTSigner> { every { makeJWT(any(), any(), any()) } returns "signed-jwt" },
     ): ControllerSetup {
         val project = mockProject(projectId)
@@ -201,7 +202,7 @@ class OIDCOnDemandTokenIssuerControllerTest : BaseTestCase() {
     @Test
     fun issue_requestedAudienceNotAllowed_returnsBadRequest() {
         val setup = createControllerSetup(
-            onDemandFeatures = listOf(createOnDemandDescriptor("aud-1\naud-2"))
+            onDemandFeatures = listOf(createOnDemandDescriptor(id = "feature-1", audiences = "aud-1\naud-2"))
         )
 
         val exception = Assertions.catchThrowableOfType(
@@ -215,7 +216,7 @@ class OIDCOnDemandTokenIssuerControllerTest : BaseTestCase() {
     @Test
     fun issue_allAllowedAudiencesRequested_allEndUpInToken() {
         val setup = createControllerSetup(
-            onDemandFeatures = listOf(createOnDemandDescriptor("aud-1\naud-2"))
+            onDemandFeatures = listOf(createOnDemandDescriptor(id = "feature-1", audiences = "aud-1\naud-2"))
         )
 
         setup.controller.issue(listOf("aud-1", "aud-2"), mockRequest())
@@ -230,7 +231,7 @@ class OIDCOnDemandTokenIssuerControllerTest : BaseTestCase() {
     @Test
     fun issue_singleAudienceFromMultipleAllowed_onlyRequestedOneInClaims() {
         val setup = createControllerSetup(
-            onDemandFeatures = listOf(createOnDemandDescriptor("aud-1\naud-2\naud-3"))
+            onDemandFeatures = listOf(createOnDemandDescriptor(id = "feature-1", audiences = "aud-1\naud-2\naud-3"))
         )
 
         setup.controller.issue(listOf("aud-2"), mockRequest())
@@ -244,7 +245,7 @@ class OIDCOnDemandTokenIssuerControllerTest : BaseTestCase() {
     @Test
     fun issue_subsetOfAllowedAudiences_onlySubsetInClaims() {
         val setup = createControllerSetup(
-            onDemandFeatures = listOf(createOnDemandDescriptor("aud-1\naud-2\naud-3\naud-4"))
+            onDemandFeatures = listOf(createOnDemandDescriptor(id = "feature-1", audiences = "aud-1\naud-2\naud-3\naud-4"))
         )
 
         setup.controller.issue(listOf("aud-1", "aud-3"), mockRequest())
@@ -260,8 +261,8 @@ class OIDCOnDemandTokenIssuerControllerTest : BaseTestCase() {
     fun issue_multipleFeatures_onlyRequestedAudiencesInToken() {
         val setup = createControllerSetup(
             onDemandFeatures = listOf(
-                createOnDemandDescriptor("aud-A\naud-B"),
-                createOnDemandDescriptor("aud-C\naud-D"),
+                createOnDemandDescriptor(id = "feature-1", audiences = "aud-A\naud-B"),
+                createOnDemandDescriptor(id = "feature-2", audiences = "aud-C\naud-D"),
             )
         )
 
@@ -275,9 +276,76 @@ class OIDCOnDemandTokenIssuerControllerTest : BaseTestCase() {
     }
 
     @Test
+    fun issue_emptyAudienceSingleFeatureMultipleAudiences_allAllowedInToken() {
+        val setup = createControllerSetup(
+            onDemandFeatures = listOf(createOnDemandDescriptor(id = "feature-1", audiences = "aud-1\naud-2"))
+        )
+
+        setup.controller.issue(emptyList(), mockRequest())
+
+        val claimsSlot = slot<ByteArray>()
+        verify { setup.signer.makeJWT(eq(setup.build), capture(claimsSlot), any()) }
+        val claims = parseClaims(claimsSlot.captured)
+        @Suppress("UNCHECKED_CAST")
+        Assertions.assertThat(claims["aud"] as List<String>).containsExactlyInAnyOrder("aud-1", "aud-2")
+    }
+
+    @Test
+    fun issue_emptyAudienceSingleFeatureSingleAudience_audienceInToken() {
+        val setup = createControllerSetup(
+            onDemandFeatures = listOf(createOnDemandDescriptor(id = "feature-1", audiences = "aud-1"))
+        )
+
+        setup.controller.issue(emptyList(), mockRequest())
+
+        val claimsSlot = slot<ByteArray>()
+        verify { setup.signer.makeJWT(eq(setup.build), capture(claimsSlot), any()) }
+        val claims = parseClaims(claimsSlot.captured)
+        Assertions.assertThat(claims["aud"]).isEqualTo("aud-1")
+    }
+
+    @Test
+    fun issue_emptyAudienceMultipleFeatures_allAllowedFromAllFeaturesInToken() {
+        val setup = createControllerSetup(
+            onDemandFeatures = listOf(
+                createOnDemandDescriptor(id = "feature-1", audiences = "aud-A\naud-B"),
+                createOnDemandDescriptor(id = "feature-2", audiences = "aud-C\naud-D"),
+            )
+        )
+
+        setup.controller.issue(emptyList(), mockRequest())
+
+        val claimsSlot = slot<ByteArray>()
+        verify { setup.signer.makeJWT(eq(setup.build), capture(claimsSlot), any()) }
+        val claims = parseClaims(claimsSlot.captured)
+        @Suppress("UNCHECKED_CAST")
+        Assertions.assertThat(claims["aud"] as List<String>)
+            .containsExactlyInAnyOrder("aud-A", "aud-B", "aud-C", "aud-D")
+    }
+
+    @Test
+    fun issue_emptyAudienceMultipleFeaturesWithOverlappingAudiences_audienceNotRepeated() {
+        val setup = createControllerSetup(
+            onDemandFeatures = listOf(
+                createOnDemandDescriptor(id = "feature-1", audiences = "aud-1\naud-shared"),
+                createOnDemandDescriptor(id = "feature-2", audiences = "aud-shared\naud-2"),
+            )
+        )
+
+        setup.controller.issue(emptyList(), mockRequest())
+
+        val claimsSlot = slot<ByteArray>()
+        verify { setup.signer.makeJWT(eq(setup.build), capture(claimsSlot), any()) }
+        val claims = parseClaims(claimsSlot.captured)
+        @Suppress("UNCHECKED_CAST")
+        Assertions.assertThat(claims["aud"] as List<String>)
+            .containsExactlyInAnyOrder("aud-1", "aud-shared", "aud-2")
+    }
+
+    @Test
     fun issue_tokenLifetime_usesConstant300Seconds() {
         val setup = createControllerSetup(
-            onDemandFeatures = listOf(createOnDemandDescriptor("aud-1"))
+            onDemandFeatures = listOf(createOnDemandDescriptor(id = "feature-1", audiences = "aud-1"))
         )
 
         setup.controller.issue(listOf("aud-1"), mockRequest())
@@ -291,7 +359,7 @@ class OIDCOnDemandTokenIssuerControllerTest : BaseTestCase() {
     fun issue_happyPath_returnsSignerOutput() {
         val signer = mockk<JWTSigner> { every { makeJWT(any(), any(), any()) } returns "signed-jwt-token-xyz" }
         val setup = createControllerSetup(
-            onDemandFeatures = listOf(createOnDemandDescriptor("aud-1")),
+            onDemandFeatures = listOf(createOnDemandDescriptor(id = "feature-1", audiences = "aud-1")),
             signer = signer,
         )
 
@@ -303,7 +371,7 @@ class OIDCOnDemandTokenIssuerControllerTest : BaseTestCase() {
     @Test
     fun issue_claimsGenerationThrows_returnsInternalServerError() {
         val setup = createControllerSetup(
-            onDemandFeatures = listOf(createOnDemandDescriptor("aud-1"))
+            onDemandFeatures = listOf(createOnDemandDescriptor(id = "feature-1", audiences = "aud-1"))
         )
         every { setup.securityContextEx.runAsSystem(any<SecurityContextEx.RunAsActionWithResult<*>>()) } throws
             RuntimeException("claims generation failed")
@@ -322,7 +390,7 @@ class OIDCOnDemandTokenIssuerControllerTest : BaseTestCase() {
         val signer = mockk<JWTSigner>()
         every { signer.makeJWT(any(), any(), any()) } throws RuntimeException("signing failed")
         val setup = createControllerSetup(
-            onDemandFeatures = listOf(createOnDemandDescriptor("aud-1")),
+            onDemandFeatures = listOf(createOnDemandDescriptor(id = "feature-1", audiences = "aud-1")),
             signer = signer,
         )
 
@@ -338,7 +406,7 @@ class OIDCOnDemandTokenIssuerControllerTest : BaseTestCase() {
     @Test
     fun issue_claimsGeneration_callsRunAsSystemExactlyOnce() {
         val setup = createControllerSetup(
-            onDemandFeatures = listOf(createOnDemandDescriptor("aud-1"))
+            onDemandFeatures = listOf(createOnDemandDescriptor(id = "feature-1", audiences = "aud-1"))
         )
 
         setup.controller.issue(listOf("aud-1"), mockRequest())
