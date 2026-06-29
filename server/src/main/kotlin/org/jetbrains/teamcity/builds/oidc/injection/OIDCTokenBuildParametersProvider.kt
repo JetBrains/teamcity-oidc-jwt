@@ -27,11 +27,6 @@ class OIDCTokenBuildParametersProvider: BuildParametersProvider {
     override fun getParametersAvailableOnAgent(build: SBuild): Collection<String?> {
         val result = mutableListOf<String>()
 
-        val onDemandFeatures = build.oidcOnDemandBuildFeatures()
-        if (onDemandFeatures.isNotEmpty()) {
-            result.add(OIDCConstants.BuildFeatureOnDemand.ENDPOINT_URL_PARAM)
-        }
-
         val inParamsFeatures = build.oidcInParamsBuildFeatures()
         inParamsFeatures.forEach { feature ->
             feature.oidcBuildParameter().let { result.add(it) }

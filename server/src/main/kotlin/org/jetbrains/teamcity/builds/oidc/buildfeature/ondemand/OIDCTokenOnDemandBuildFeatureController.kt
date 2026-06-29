@@ -22,7 +22,7 @@ class OIDCTokenOnDemandBuildFeatureController(
     override fun doHandle(request: HttpServletRequest, response: HttpServletResponse): ModelAndView {
         val mv = super.doHandle(request, response)
 
-        mv.model["onDemandUrlParam"] = OIDCConstants.BuildFeatureOnDemand.ENDPOINT_URL_PARAM
+        mv.model["onDemandUrlParam"] = "%teamcity.serverUrl%${OIDCConstants.OIDC_ROOT_URL}/${OIDCConstants.BuildFeatureOnDemand.CONTROLLER_ROOT}"
         return mv
     }
 }

@@ -22,11 +22,10 @@ class OIDCTokenBuildParametersProviderTest : BaseTestCase() {
     }
 
     private fun mockBuild(
-        onDemandFeatures: List<SBuildFeatureDescriptor> = emptyList(),
         inParamsFeatures: List<SBuildFeatureDescriptor> = emptyList()
     ): SBuild {
         val build = mockk<SBuild>()
-        every { build.getBuildFeaturesOfType("oidcTokenOnDemand") } returns onDemandFeatures
+        every { build.getBuildFeaturesOfType("oidcTokenOnDemand") } throws Exception("Should not be called")
         every { build.getBuildFeaturesOfType("oidcTokenInParams") } returns inParamsFeatures
         return build
     }
@@ -50,24 +49,6 @@ class OIDCTokenBuildParametersProviderTest : BaseTestCase() {
     }
 
     @Test
-    fun getParametersAvailableOnAgent_oneOnDemandFeature_addsEndpointUrlParam() {
-        val build = mockBuild(onDemandFeatures = listOf(mockk()))
-
-        val result = provider.getParametersAvailableOnAgent(build)
-
-        Assertions.assertThat(result.toList()).isEqualTo(listOf("teamcity.build.oidc.endpoint"))
-    }
-
-    @Test
-    fun getParametersAvailableOnAgent_multipleOnDemandFeatures_addsEndpointUrlParamOnce() {
-        val build = mockBuild(onDemandFeatures = listOf(mockk(), mockk()))
-
-        val result = provider.getParametersAvailableOnAgent(build)
-
-        Assertions.assertThat(result.toList()).isEqualTo(listOf("teamcity.build.oidc.endpoint"))
-    }
-
-    @Test
     fun getParametersAvailableOnAgent_oneInParamsFeature_addsBuildParam() {
         val descriptor = createInParamsDescriptor(buildParam = "my.param")
         val build = mockBuild(inParamsFeatures = listOf(descriptor))
@@ -86,18 +67,5 @@ class OIDCTokenBuildParametersProviderTest : BaseTestCase() {
         val result = provider.getParametersAvailableOnAgent(build)
 
         Assertions.assertThat(result.toList()).isEqualTo(listOf("param.one", "param.two"))
-    }
-
-    @Test
-    fun getParametersAvailableOnAgent_combinedOnDemandAndInParams_returnsAll() {
-        val inParamsDescriptor = createInParamsDescriptor(buildParam = "my.param")
-        val build = mockBuild(
-            onDemandFeatures = listOf(mockk()),
-            inParamsFeatures = listOf(inParamsDescriptor)
-        )
-
-        val result = provider.getParametersAvailableOnAgent(build)
-
-        Assertions.assertThat(result.toList()).isEqualTo(listOf("teamcity.build.oidc.endpoint", "my.param"))
     }
 }

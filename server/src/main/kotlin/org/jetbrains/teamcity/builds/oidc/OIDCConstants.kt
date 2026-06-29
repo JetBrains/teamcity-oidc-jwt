@@ -90,7 +90,6 @@ object OIDCConstants {
         const val BUILD_FEATURE_PATH_HTML = "oidcTokenOnDemandBuildFeature.html"
 
         // Kotlin DSL also refers to this parameter. Please update it as well.
-        const val ENDPOINT_URL_PARAM = "teamcity.build.oidc.endpoint"
         const val AUDIENCES_PARAM = "audiences"
 
         const val CONTROLLER_ROOT = "issue"
