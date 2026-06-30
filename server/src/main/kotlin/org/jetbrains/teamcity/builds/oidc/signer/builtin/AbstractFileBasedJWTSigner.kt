@@ -157,8 +157,10 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
                 + multiNodeTasks.findInProgressTasks(taskType))
         // Also, fetch recently finished succeeded tasks to cover the gap
         // between rotation and current node refreshing cache.
+        //
+        // Emptiness check is a workaround: when `t?.finished()` is called, `getResult` on that task throws an NPE
         val finishedSucceededTasks = multiNodeTasks.findFinishedTasks(taskType, KEY_ROTATION_TASK_FINISH_THRESHOLD_MS)
-            .filter { it.result == null }
+            .filter { it.result?.isEmpty() ?: true }
         val inProgressTasks = processingTasks + finishedSucceededTasks
         val identityPrefix = "$currentKey@"
         return inProgressTasks.any { it.identity.startsWith(identityPrefix) }
@@ -174,9 +176,11 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
 
         // Get the latest failed finished task
         val identityPrefix = "$currentKey@"
-        val latestFailedTask = finishedTasks.filter { it.identity.startsWith(identityPrefix) && it.result != null }.maxByOrNull {
-            it.lastActivityTime?.time ?: 0
-        } ?: return null
+
+        // Emptiness check is a workaround: when `t?.finished()` is called, `getResult` on that task throws an NPE
+        val latestFailedTask = finishedTasks
+            .filter { it.identity.startsWith(identityPrefix) && it.result?.isNotEmpty() ?: false }
+            .maxByOrNull { it.lastActivityTime?.time ?: 0 } ?: return null
 
         // There is at least one failed task. However, let's also check if there are any tasks in progress.
         // If there are, ignore the error (it's in progress, perhaps it will not fail).
@@ -192,7 +196,7 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
         val task = multiNodeTasks.findTask(rotationTaskType, taskID) ?: return null
 
         return when {
-            task.isDoneSuccessfully && task.result != null -> "Failed: ${task.result}"
+            task.isDoneSuccessfully && task.result?.isNotEmpty() ?: false -> "Failed: ${task.result}"
             task.isDoneSuccessfully -> "Success"
             task.isDone -> "Cancelled"
             task.executorNodeId != null -> "In progress on ${task.executorNodeId}"
@@ -324,7 +328,8 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
         override fun accept(t: MultiNodeTasks.PerformingTask?) {
             try {
                 rotateKey(t?.identity?.substringBefore('@'))
-                t?.finished()
+                // Empty result is a workaround: when `t?.finished()` is called, `getResult` on that task throws an NPE
+                t?.finished(Dates.now(), "")
             } catch (e: Exception) {
                 log.warnAndDebugDetails("Failed to rotate the key", e)
                 // Task must be finished even if rotation fails. Otherwise, it will be stuck in the `in progress` state

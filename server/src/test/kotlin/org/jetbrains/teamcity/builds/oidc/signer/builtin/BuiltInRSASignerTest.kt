@@ -1146,8 +1146,8 @@ class BuiltInRSASignerTest : BaseTestCase() {
         ).isEmpty()
         verify(exactly = 0) { encryption.encrypt(any()) }
         // The task still completes successfully (no failure details).
-        verify(exactly = 1) { task.finished() }
-        verify(exactly = 0) { task.finished(any(), any()) }
+        verify(exactly = 0) { task.finished() }
+        verify(exactly = 1) { task.finished(any(), any()) }
     }
 
     @Test
@@ -1175,8 +1175,8 @@ class BuiltInRSASignerTest : BaseTestCase() {
 
         consumer.accept(task)
 
-        verify(exactly = 1) { task.finished() }
-        verify(exactly = 0) { task.finished(any(), any()) }
+        verify(exactly = 0) { task.finished() }
+        verify(exactly = 1) { task.finished(any(), any()) }
     }
 
     @Test
