@@ -20,6 +20,7 @@ import jetbrains.buildServer.serverSide.ServerPaths
 import jetbrains.buildServer.serverSide.ServerResponsibility
 import jetbrains.buildServer.serverSide.TeamCityNodes
 import jetbrains.buildServer.serverSide.crypt.Encryption
+import jetbrains.buildServer.util.Dates
 import jetbrains.buildServer.web.openapi.PluginDescriptor
 import jetbrains.buildServer.web.openapi.WebControllerManager
 import org.jetbrains.teamcity.builds.oidc.OIDCConstants.AbstractSigner.KEY_ROTATION_TASK_FINISH_THRESHOLD_MS
@@ -256,6 +257,9 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
                 t?.finished()
             } catch (e: Exception) {
                 log.warnAndDebugDetails("Failed to rotate the key", e)
+                // Task must be finished even if rotation fails. Otherwise, it will be stuck in the `in progress` state
+                // until the assigned node gets offline.
+                t?.finished(Dates.now(), "Failed to rotate the key due to ${e.javaClass.name}: ${e.message ?: "$e (no message)"}")
             }
         }
     }

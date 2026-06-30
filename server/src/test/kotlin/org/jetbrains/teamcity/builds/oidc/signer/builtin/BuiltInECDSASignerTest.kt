@@ -1007,6 +1007,55 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         ).isEmpty()
     }
 
+    @Test
+    fun rotationTask_successfulRotation_finishesTaskWithoutFailureDetails() {
+        val signer = createSigner()
+        makeSimpleJWT(signer) // generate current key (capability = true)
+        val consumer = captureRotationConsumer()
+        val task = mockk<MultiNodeTasks.PerformingTask>(relaxed = true)
+
+        consumer.accept(task)
+
+        verify(exactly = 1) { task.finished() }
+        verify(exactly = 0) { task.finished(any(), any()) }
+    }
+
+    @Test
+    fun rotationTask_rotationFailsWithMessage_finishesTaskWithFailureDetails() {
+        val signer = createSigner()
+        makeSimpleJWT(signer) // generate current key while encryption works
+        val consumer = captureRotationConsumer()
+        // Break the backup save performed during rotation so accept() hits the failure branch.
+        every { encryption.encrypt(any()) } throws RuntimeException("disk full")
+        val task = mockk<MultiNodeTasks.PerformingTask>(relaxed = true)
+        val details = slot<String>()
+
+        consumer.accept(task)
+
+        verify(exactly = 0) { task.finished() }
+        verify(exactly = 1) { task.finished(any(), capture(details)) }
+        Assertions.assertThat(details.captured)
+            .isEqualTo("Failed to rotate the key due to java.lang.RuntimeException: disk full")
+    }
+
+    @Test
+    fun rotationTask_rotationFailsWithoutMessage_finishesTaskWithFallbackDetails() {
+        val signer = createSigner()
+        makeSimpleJWT(signer) // generate current key while encryption works
+        val consumer = captureRotationConsumer()
+        // Exception without a message: the details fall back to "${e} (no message)".
+        every { encryption.encrypt(any()) } throws RuntimeException()
+        val task = mockk<MultiNodeTasks.PerformingTask>(relaxed = true)
+        val details = slot<String>()
+
+        consumer.accept(task)
+
+        verify(exactly = 0) { task.finished() }
+        verify(exactly = 1) { task.finished(any(), capture(details)) }
+        Assertions.assertThat(details.captured)
+            .isEqualTo("Failed to rotate the key due to java.lang.RuntimeException: java.lang.RuntimeException (no message)")
+    }
+
     private fun taskWithIdentity(identity: String): MultiNodeTasks.SubmittedTask =
         mockk { every { this@mockk.identity } returns identity }
 
