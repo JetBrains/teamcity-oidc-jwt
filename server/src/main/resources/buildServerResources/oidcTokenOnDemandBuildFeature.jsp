@@ -46,7 +46,7 @@
   <td>
     <div id="clipboardEndpoint" class="clipboard-btn tc-icon icon16 tc-icon_copy" data-clipboard-action="copy"
          data-clipboard-target="#oidcEndpoint"></div><code id="oidcEndpoint"><c:out value="${onDemandUrlParam}"/></code>
-    <span class="smallNote">Use this snippet in your build script with <code>system.teamcity.auth.userId</code> and <code>system.teamcity.auth.password</code> basic auth.</span>
+    <span class="smallNote">Use this snippet in your build script with <a href="https://www.jetbrains.com/help/teamcity/artifact-dependencies.html#build-level-auth" target="_blank">build-level auth credentials</a> (<code>system.teamcity.auth.userId</code> and <code>system.teamcity.auth.password</code> basic auth).</span>
   </td>
 </tr>
 
