@@ -139,7 +139,7 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
             getKey(generateIfMissing = false)
         }
 
-        val currentKeyID = currentKey?.keyID ?: throw JWTSignerException("Cannot get key ID to rotate")
+        val currentKeyID = currentKey?.keyID ?: throw JWTSignerException("Cannot get a key to rotate. Please make sure the key has been generated.")
         if (isKeyRotationInProgress(currentKeyID)) {
             throw JWTSignerException("Key rotation $currentKeyID is already in progress.")
         }
