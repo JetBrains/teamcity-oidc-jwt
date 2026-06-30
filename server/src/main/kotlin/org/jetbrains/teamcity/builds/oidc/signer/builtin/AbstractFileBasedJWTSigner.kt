@@ -132,21 +132,23 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
         }
     }
 
-    fun requestKeyRotation() {
+    fun requestKeyRotation(): String {
         val currentKey = keyLock.write {
             // Reset the cache to get a fresh key ID
             cachedKey = null
             getKey(generateIfMissing = false)
         }
 
-        val currentKeyID = currentKey?.keyID ?: return
+        val currentKeyID = currentKey?.keyID ?: throw JWTSignerException("Cannot get key ID to rotate")
         if (isKeyRotationInProgress(currentKeyID)) {
             throw JWTSignerException("Key rotation $currentKeyID is already in progress.")
         }
 
         // Identity needs to be randomized because tasks are marked as finished
         // regardless of their outcome (success/failure).
-        multiNodeTasks.submit(MultiNodeTasks.TaskData(rotationTaskType, "${currentKeyID}@${UUID.randomUUID()}"))
+        val taskID = "${currentKeyID}@${UUID.randomUUID()}"
+        multiNodeTasks.submit(MultiNodeTasks.TaskData(rotationTaskType, taskID))
+        return taskID
     }
 
     fun isKeyRotationInProgress(currentKey: String): Boolean {

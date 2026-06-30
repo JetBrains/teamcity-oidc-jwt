@@ -1313,6 +1313,17 @@ class BuiltInRSASignerTest : BaseTestCase() {
         }
     }
 
+    @Test
+    fun requestKeyRotation_keyPresent_returnsSubmittedTaskID() {
+        val signer = createSigner()
+        val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
+
+        val taskID = signer.requestKeyRotation()
+
+        verify(exactly = 1) { multiNodeTasks.submit(match { it.identity == taskID }) }
+        Assertions.assertThat(taskID).startsWith("$kid@")
+    }
+
     /*
      * fillSettingsModel rotation-in-progress suffix
      */

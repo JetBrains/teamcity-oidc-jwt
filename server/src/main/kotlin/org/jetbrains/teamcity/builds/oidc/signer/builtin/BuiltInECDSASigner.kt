@@ -23,6 +23,7 @@ import jetbrains.buildServer.util.Cached
 import jetbrains.buildServer.web.openapi.PluginDescriptor
 import jetbrains.buildServer.web.openapi.WebControllerManager
 import org.jetbrains.teamcity.builds.oidc.api.JWKCache
+import org.jetbrains.teamcity.builds.oidc.api.JWTSignerException
 import kotlin.concurrent.write
 
 /**
@@ -114,7 +115,11 @@ class BuiltInECDSASigner(
         if (jwsAlgorithm == settingsStore.get().jwsAlgorithm) return emptyMap()
 
         settingsStore.save(BuiltInECDSASettings(jwsAlgorithm = jwsAlgorithm))
-        requestKeyRotation()
+        try {
+            requestKeyRotation()
+        } catch (e: JWTSignerException) {
+            // Ignore key rotation request failures as long as they come from our code
+        }
 
         return emptyMap()
     }

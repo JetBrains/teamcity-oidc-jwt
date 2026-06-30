@@ -1166,11 +1166,14 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     }
 
     @Test
-    fun requestKeyRotation_noKey_doesNotSubmit() {
+    fun requestKeyRotation_noKey_throwsAndDoesNotSubmit() {
         val signer = createSigner()
         // No key on disk
 
-        signer.requestKeyRotation()
+        Assertions.catchThrowableOfType(
+            { signer.requestKeyRotation() },
+            JWTSignerException::class.java
+        )
 
         verify(exactly = 0) { multiNodeTasks.submit(any()) }
     }
@@ -1199,6 +1202,17 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         verify(exactly = 1) {
             multiNodeTasks.submit(match { it.type == "oidc-jwt-rotate-key-ecdsa" && it.identity.startsWith("$kid@") })
         }
+    }
+
+    @Test
+    fun requestKeyRotation_keyPresent_returnsSubmittedTaskID() {
+        val signer = createSigner()
+        val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
+
+        val taskID = signer.requestKeyRotation()
+
+        verify(exactly = 1) { multiNodeTasks.submit(match { it.identity == taskID }) }
+        Assertions.assertThat(taskID).startsWith("$kid@")
     }
 
     /*

@@ -23,6 +23,7 @@ import jetbrains.buildServer.util.Cached
 import jetbrains.buildServer.web.openapi.PluginDescriptor
 import jetbrains.buildServer.web.openapi.WebControllerManager
 import org.jetbrains.teamcity.builds.oidc.api.JWKCache
+import org.jetbrains.teamcity.builds.oidc.api.JWTSignerException
 import java.security.KeyPairGenerator
 import java.security.interfaces.RSAPrivateKey
 import java.security.interfaces.RSAPublicKey
@@ -143,7 +144,11 @@ class BuiltInRSASigner(
         val newSettings = BuiltInRSASettings(jwsAlgorithm = jwsAlgorithm, rsaKeyBits = rsaKeyBits)
         settingsStore.save(newSettings)
         if (bitsChanged) {
-            requestKeyRotation()
+            try {
+                requestKeyRotation()
+            } catch (e: JWTSignerException) {
+                // Ignore key rotation request failures as long as they come from our code
+            }
         }
 
         return emptyMap()
