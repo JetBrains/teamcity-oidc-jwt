@@ -159,6 +159,18 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
         return processingTasks.any { it.identity.startsWith(currentKey) }
     }
 
+    fun rotationTaskStatus(taskID: String): String? {
+        val task = multiNodeTasks.findTask(rotationTaskType, taskID) ?: return null
+
+        return when {
+            task.isDoneSuccessfully && task.result != null -> "Failed: ${task.result}"
+            task.isDoneSuccessfully -> "Success"
+            task.isDone -> "Cancelled"
+            task.executorNodeId != null -> "In progress on ${task.executorNodeId}"
+            else -> "Pending"
+        }
+    }
+
     override fun makeJWT(build: SBuild, claimsJSON: ByteArray, expiresAt: Instant): String {
         try {
             val key = getKey(generateIfMissing = true) ?: throw JWTSignerException("Cannot load or generate key")

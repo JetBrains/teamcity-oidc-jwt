@@ -1107,6 +1107,18 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     private fun taskWithIdentity(identity: String): MultiNodeTasks.SubmittedTask =
         mockk { every { this@mockk.identity } returns identity }
 
+    private fun submittedTask(
+        isDoneSuccessfully: Boolean = false,
+        result: String? = null,
+        isDone: Boolean = false,
+        executorNodeId: String? = null,
+    ): MultiNodeTasks.SubmittedTask = mockk {
+        every { this@mockk.isDoneSuccessfully } returns isDoneSuccessfully
+        every { this@mockk.result } returns result
+        every { this@mockk.isDone } returns isDone
+        every { this@mockk.executorNodeId } returns executorNodeId
+    }
+
     /*
      * isKeyRotationInProgress
      */
@@ -1213,6 +1225,62 @@ class BuiltInECDSASignerTest : BaseTestCase() {
 
         verify(exactly = 1) { multiNodeTasks.submit(match { it.identity == taskID }) }
         Assertions.assertThat(taskID).startsWith("$kid@")
+    }
+
+    /*
+     * rotationTaskStatus
+     */
+
+    @Test
+    fun rotationTaskStatus_taskNotFound_returnsNull() {
+        val signer = createSigner()
+        every { multiNodeTasks.findTask("oidc-jwt-rotate-key-ecdsa", "task-1") } returns null
+
+        Assertions.assertThat(signer.rotationTaskStatus("task-1")).isNull()
+    }
+
+    @Test
+    fun rotationTaskStatus_doneSuccessfullyWithResult_returnsFailedWithReason() {
+        val signer = createSigner()
+        every { multiNodeTasks.findTask("oidc-jwt-rotate-key-ecdsa", "task-1") } returns
+            submittedTask(isDoneSuccessfully = true, result = "boom")
+
+        Assertions.assertThat(signer.rotationTaskStatus("task-1")).isEqualTo("Failed: boom")
+    }
+
+    @Test
+    fun rotationTaskStatus_doneSuccessfully_returnsSuccess() {
+        val signer = createSigner()
+        every { multiNodeTasks.findTask("oidc-jwt-rotate-key-ecdsa", "task-1") } returns
+            submittedTask(isDoneSuccessfully = true, result = null)
+
+        Assertions.assertThat(signer.rotationTaskStatus("task-1")).isEqualTo("Success")
+    }
+
+    @Test
+    fun rotationTaskStatus_doneButNotSuccessfully_returnsCancelled() {
+        val signer = createSigner()
+        every { multiNodeTasks.findTask("oidc-jwt-rotate-key-ecdsa", "task-1") } returns
+            submittedTask(isDone = true)
+
+        Assertions.assertThat(signer.rotationTaskStatus("task-1")).isEqualTo("Cancelled")
+    }
+
+    @Test
+    fun rotationTaskStatus_assignedToNodeNotDone_returnsInProgress() {
+        val signer = createSigner()
+        every { multiNodeTasks.findTask("oidc-jwt-rotate-key-ecdsa", "task-1") } returns
+            submittedTask(executorNodeId = "node-7")
+
+        Assertions.assertThat(signer.rotationTaskStatus("task-1")).isEqualTo("In progress on node-7")
+    }
+
+    @Test
+    fun rotationTaskStatus_pendingTask_returnsPending() {
+        val signer = createSigner()
+        every { multiNodeTasks.findTask("oidc-jwt-rotate-key-ecdsa", "task-1") } returns submittedTask()
+
+        Assertions.assertThat(signer.rotationTaskStatus("task-1")).isEqualTo("Pending")
     }
 
     /*
