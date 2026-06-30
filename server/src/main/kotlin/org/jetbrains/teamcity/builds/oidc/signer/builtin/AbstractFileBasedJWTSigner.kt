@@ -131,24 +131,6 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
         }
     }
 
-    private fun rotateKey() {
-        // Get the current key if exists, do not generate a new one
-        val currentKey = getKey(generateIfMissing = false)
-        val keySize = getKeySize(currentKey) ?: "unknown"
-        fileWatcher.runActionWithDisabledObserver {
-            keyLock.write {
-                // Save the current key if it exists
-                if (currentKey != null) {
-                    val rotatedName =
-                        "private.${keySize}.${currentKey.keyID}.rotated-on-${Instant.now().epochSecond}"
-                    saveKey(currentKey, keyDir.resolve(rotatedName))
-                }
-                Files.deleteIfExists(keyFile)
-                cachedKey = null
-            }
-        }
-    }
-
     fun requestKeyRotation() {
         val currentKey = keyLock.write {
             // Reset the cache to get a fresh key ID
@@ -251,9 +233,47 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
             return serverResponsibility.canManageBuilds()
         }
 
+        /**
+         * Rotate the current signing key if its id matches the provided expected key id.
+         *
+         * Expected key ID check is there to prevent rotation conflicts where
+         * - A rotation task is scheduled twice for the same key
+         * - One of the nodes has successfully performed the first scheduled task
+         * - Any node has already generated a new key after the rotation
+         * - After that, a second node processes the second rotation task, rotating the newly generated key
+         *
+         * There's still a race condition between rotating nodes that can result in two copies of the rotated key.
+         *
+         * @param expectedKeyID the key id that the task is expected to rotate.
+         */
+        private fun rotateKey(expectedKeyID: String?) = IOGuard.allowDiskWrite<Exception> {
+            // Get the current key from the file system if exists, do not generate a new one
+            val currentKey = keyLock.write {
+                // Reset the cache to get a fresh key ID
+                cachedKey = null
+                getKey(generateIfMissing = false)
+            } ?: return@allowDiskWrite  // If there's nothing to rotate, exit early
+
+            val keySize = getKeySize(currentKey) ?: "unknown"
+            if (expectedKeyID != null && currentKey.keyID != expectedKeyID) {
+                throw JWTSignerException("Expected rotated key ID $expectedKeyID, got ${currentKey.keyID}")
+            }
+
+            fileWatcher.runActionWithDisabledObserver {
+                keyLock.write {
+                    // Save the current key.
+                    val rotatedName =
+                        "private.${keySize}.${currentKey.keyID}.rotated-on-${Instant.now().epochSecond}"
+                    saveKey(currentKey, keyDir.resolve(rotatedName))
+                    Files.deleteIfExists(keyFile)
+                    cachedKey = null
+                }
+            }
+        }
+
         override fun accept(t: MultiNodeTasks.PerformingTask?) {
             try {
-                rotateKey()
+                rotateKey(t?.identity?.substringBefore('@'))
                 t?.finished()
             } catch (e: Exception) {
                 log.warnAndDebugDetails("Failed to rotate the key", e)

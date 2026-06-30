@@ -135,9 +135,12 @@ class BuiltInRSASignerTest : BaseTestCase() {
         return slot.captured
     }
 
-    private fun driveRotationTask(consumer: MultiNodeTasks.TaskConsumer) {
+    private fun rotationTask(keyID: String): MultiNodeTasks.PerformingTask =
+        mockk(relaxed = true) { every { identity } returns "$keyID@test-rotation" }
+
+    private fun driveRotationTask(consumer: MultiNodeTasks.TaskConsumer, keyID: String) {
         // Honor the framework contract: accept() runs only if beforeAccept() is true.
-        val task = mockk<MultiNodeTasks.PerformingTask>(relaxed = true)
+        val task = rotationTask(keyID)
         if (consumer.beforeAccept(task)) consumer.accept(task)
     }
 
@@ -704,9 +707,10 @@ class BuiltInRSASignerTest : BaseTestCase() {
         val signer = createSigner()
         makeSimpleJWT(signer) // generates 3072-bit key
 
+        val kid = signer.cachedKey!!.keyID
         signer.saveSettings(mutableMapOf("rsaKeyBits" to "4096", "jwsAlgorithm" to "RS256"))
         // Drive the deferred rotation task: it backs up and deletes the current key.
-        driveRotationTask(captureRotationConsumer())
+        driveRotationTask(captureRotationConsumer(), kid)
         makeSimpleJWT(signer) // should now generate a new 4096-bit key
 
         val pubKey = extractPublicKey(signer)
@@ -767,7 +771,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
         }
 
         // After the deferred task runs, the new algorithm and key size take effect.
-        driveRotationTask(captureRotationConsumer())
+        driveRotationTask(captureRotationConsumer(), kid)
         val jws = parseJWT(makeSimpleJWT(signer))
         Assertions.assertThat(jws.header.algorithm.name).isEqualTo("PS384")
         Assertions.assertThat(extractPublicKey(signer).toRSAPublicKey().modulus.bitLength()).isEqualTo(4096)
@@ -1097,7 +1101,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
         val signer = createSigner()
         makeSimpleJWT(signer) // generate current key (capability = true)
 
-        driveRotationTask(captureRotationConsumer())
+        driveRotationTask(captureRotationConsumer(), signer.cachedKey!!.keyID)
 
         Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
         Assertions.assertThat(
@@ -1106,13 +1110,54 @@ class BuiltInRSASignerTest : BaseTestCase() {
     }
 
     @Test
+    fun rotationTask_savesPreviousKeyToBackupAndRemovesKeyFile() {
+        val signer = createSigner()
+        makeSimpleJWT(signer) // generate current key (capability = true)
+        val previousKid = signer.cachedKey!!.keyID
+
+        driveRotationTask(captureRotationConsumer(), previousKid)
+
+        // The live key file is removed.
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+
+        // Exactly one backup, named after the previous key, holding the previous key itself.
+        val rotated = listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
+        Assertions.assertThat(rotated).hasSize(1)
+        Assertions.assertThat(rotated[0].fileName.toString()).contains(previousKid)
+        val backedUp = RSAKey.parse(encryption.decrypt(Files.readString(rotated[0])))
+        Assertions.assertThat(backedUp.keyID).isEqualTo(previousKid)
+        Assertions.assertThat(backedUp.isPrivate).isTrue()
+    }
+
+    @Test
+    fun rotationTask_noCurrentKey_exitsEarlyWithoutRotating() {
+        val signer = createSigner()
+        // No key on disk: there is nothing to rotate.
+        val consumer = captureRotationConsumer()
+        val task = rotationTask("nonexistent-kid")
+
+        consumer.accept(task)
+
+        // Early return: no backup written, no key file created, no save attempted.
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+        Assertions.assertThat(
+            listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
+        ).isEmpty()
+        verify(exactly = 0) { encryption.encrypt(any()) }
+        // The task still completes successfully (no failure details).
+        verify(exactly = 1) { task.finished() }
+        verify(exactly = 0) { task.finished(any(), any()) }
+    }
+
+    @Test
     fun rotationTask_withoutBuildManagementCapability_doesNotRotate() {
         val signer = createSigner()
         makeSimpleJWT(signer) // generate key while capability = true
+        val kid = signer.cachedKey!!.keyID
 
         every { serverResponsibility.canManageBuilds() } returns false
 
-        driveRotationTask(captureRotationConsumer())
+        driveRotationTask(captureRotationConsumer(), kid)
 
         Assertions.assertThat(Files.exists(keyFilePath())).isTrue()
         Assertions.assertThat(
@@ -1125,7 +1170,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
         val signer = createSigner()
         makeSimpleJWT(signer) // generate current key (capability = true)
         val consumer = captureRotationConsumer()
-        val task = mockk<MultiNodeTasks.PerformingTask>(relaxed = true)
+        val task = rotationTask(signer.cachedKey!!.keyID)
 
         consumer.accept(task)
 
@@ -1138,9 +1183,10 @@ class BuiltInRSASignerTest : BaseTestCase() {
         val signer = createSigner()
         makeSimpleJWT(signer) // generate current key while encryption works
         val consumer = captureRotationConsumer()
+        // Capture the kid before breaking encryption so the task passes the key-ID guard.
+        val task = rotationTask(signer.cachedKey!!.keyID)
         // Break the backup save performed during rotation so accept() hits the failure branch.
         every { encryption.encrypt(any()) } throws RuntimeException("disk full")
-        val task = mockk<MultiNodeTasks.PerformingTask>(relaxed = true)
         val details = slot<String>()
 
         consumer.accept(task)
@@ -1156,9 +1202,10 @@ class BuiltInRSASignerTest : BaseTestCase() {
         val signer = createSigner()
         makeSimpleJWT(signer) // generate current key while encryption works
         val consumer = captureRotationConsumer()
+        // Capture the kid before breaking encryption so the task passes the key-ID guard.
+        val task = rotationTask(signer.cachedKey!!.keyID)
         // Exception without a message: the details fall back to "${e} (no message)".
         every { encryption.encrypt(any()) } throws RuntimeException()
-        val task = mockk<MultiNodeTasks.PerformingTask>(relaxed = true)
         val details = slot<String>()
 
         consumer.accept(task)
