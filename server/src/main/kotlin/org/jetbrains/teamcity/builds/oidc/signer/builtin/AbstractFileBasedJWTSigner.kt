@@ -154,9 +154,38 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
     fun isKeyRotationInProgress(currentKey: String): Boolean {
         val taskType = listOf(rotationTaskType)
         val processingTasks = (multiNodeTasks.findPendingTasks(taskType)
-                + multiNodeTasks.findInProgressTasks(taskType)
-                + multiNodeTasks.findFinishedTasks(taskType, KEY_ROTATION_TASK_FINISH_THRESHOLD_MS))
-        return processingTasks.any { it.identity.startsWith(currentKey) }
+                + multiNodeTasks.findInProgressTasks(taskType))
+        // Also, fetch recently finished succeeded tasks to cover the gap
+        // between rotation and current node refreshing cache.
+        val finishedSucceededTasks = multiNodeTasks.findFinishedTasks(taskType, KEY_ROTATION_TASK_FINISH_THRESHOLD_MS)
+            .filter { it.result == null }
+        val inProgressTasks = processingTasks + finishedSucceededTasks
+        val identityPrefix = "$currentKey@"
+        return inProgressTasks.any { it.identity.startsWith(identityPrefix) }
+    }
+
+    fun getLatestKeyRotationError(currentKey: String): String? {
+        val taskType = listOf(rotationTaskType)
+
+        // Unfortunately, there's no way to fetch all finished tasks without a date cutoff,
+        // so we use a month-long threshold here. The default TTL of finished tasks is 8 hours, btw.
+        val finishedTasks = multiNodeTasks.findFinishedTasks(taskType, Dates.ONE_WEEK * 4)
+        if (finishedTasks.isEmpty()) return null
+
+        // Get the latest failed finished task
+        val identityPrefix = "$currentKey@"
+        val latestFailedTask = finishedTasks.filter { it.identity.startsWith(identityPrefix) && it.result != null }.maxByOrNull {
+            it.lastActivityTime?.time ?: 0
+        } ?: return null
+
+        // There is at least one failed task. However, let's also check if there are any tasks in progress.
+        // If there are, ignore the error (it's in progress, perhaps it will not fail).
+        val processingTasks = (multiNodeTasks.findPendingTasks(taskType)
+                + multiNodeTasks.findInProgressTasks(taskType)).filter { it.identity.startsWith(identityPrefix) }
+        if (processingTasks.isNotEmpty()) return null
+
+        // If there are no processing tasks, the latest failed task is the one we're interested in.
+        return latestFailedTask.result
     }
 
     fun rotationTaskStatus(taskID: String): String? {
@@ -225,6 +254,10 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
             val rotating = isKeyRotationInProgress(keyFingerprint)
             if (rotating) {
                 keyFingerprint += " (rotation in progress)"
+            }
+            val lastError = getLatestKeyRotationError(keyFingerprint)
+            if (lastError != null) {
+                model["keyRotationLastError"] = lastError
             }
         }
         model["keyFingerprint"] = keyFingerprint ?: "<will be generated on first use>"

@@ -28,6 +28,7 @@ import java.security.interfaces.RSAPrivateKey
 import java.security.interfaces.RSAPublicKey
 import java.time.Instant
 import java.util.Comparator
+import java.util.Date
 
 class BuiltInRSASignerTest : BaseTestCase() {
 
@@ -1231,6 +1232,16 @@ class BuiltInRSASignerTest : BaseTestCase() {
         every { this@mockk.executorNodeId } returns executorNodeId
     }
 
+    private fun finishedTask(
+        identity: String,
+        result: String? = null,
+        lastActivityTime: Long = 0L,
+    ): MultiNodeTasks.SubmittedTask = mockk {
+        every { this@mockk.identity } returns identity
+        every { this@mockk.result } returns result
+        every { this@mockk.lastActivityTime } returns Date(lastActivityTime)
+    }
+
     /*
      * isKeyRotationInProgress
      */
@@ -1238,7 +1249,8 @@ class BuiltInRSASignerTest : BaseTestCase() {
     @Test
     fun isKeyRotationInProgress_pendingTaskWithMatchingIdentity_returnsTrue() {
         val signer = createSigner()
-        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity("kid-1"))
+        // Task identities are "${keyID}@${random}", so the key id is matched as a prefix.
+        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity("kid-1@task-1"))
 
         Assertions.assertThat(signer.isKeyRotationInProgress("kid-1")).isTrue()
     }
@@ -1253,18 +1265,30 @@ class BuiltInRSASignerTest : BaseTestCase() {
     @Test
     fun isKeyRotationInProgress_inProgressTaskWithMatchingIdentity_returnsTrue() {
         val signer = createSigner()
-        every { multiNodeTasks.findInProgressTasks(any()) } returns listOf(taskWithIdentity("kid-1"))
+        every { multiNodeTasks.findInProgressTasks(any()) } returns listOf(taskWithIdentity("kid-1@task-1"))
 
         Assertions.assertThat(signer.isKeyRotationInProgress("kid-1")).isTrue()
     }
 
     @Test
-    fun isKeyRotationInProgress_recentlyFinishedTaskWithMatchingIdentity_returnsTrueUsingThreshold() {
+    fun isKeyRotationInProgress_recentlyFinishedSucceededTaskWithMatchingIdentity_returnsTrueUsingThreshold() {
         val signer = createSigner()
-        every { multiNodeTasks.findFinishedTasks(any(), 10000L) } returns listOf(taskWithIdentity("kid-1"))
+        // Only finished tasks with a null result (succeeded) count, covering the cache-refresh gap.
+        every { multiNodeTasks.findFinishedTasks(any(), 10000L) } returns
+            listOf(finishedTask("kid-1@task-1", result = null))
 
         Assertions.assertThat(signer.isKeyRotationInProgress("kid-1")).isTrue()
         verify { multiNodeTasks.findFinishedTasks(any(), 10000L) }
+    }
+
+    @Test
+    fun isKeyRotationInProgress_recentlyFinishedFailedTaskWithMatchingIdentity_returnsFalse() {
+        val signer = createSigner()
+        // A finished task with a non-null result is a failure, not an in-progress rotation.
+        every { multiNodeTasks.findFinishedTasks(any(), 10000L) } returns
+            listOf(finishedTask("kid-1@task-1", result = "boom"))
+
+        Assertions.assertThat(signer.isKeyRotationInProgress("kid-1")).isFalse()
     }
 
     /*
@@ -1306,7 +1330,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
     fun requestKeyRotation_rotationAlreadyInProgress_throwsAndDoesNotSubmit() {
         val signer = createSigner()
         val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
-        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity(kid))
+        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity("$kid@task-1"))
 
         Assertions.catchThrowableOfType(
             { signer.requestKeyRotation() },
@@ -1403,7 +1427,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
     fun fillSettingsModel_pendingRotationTask_appendsRotationSuffix() {
         val signer = createSigner()
         val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
-        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity(kid))
+        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity("$kid@task-1"))
 
         val model = mutableMapOf<String, Any>()
         signer.fillSettingsModel(model)
@@ -1415,7 +1439,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
     fun fillSettingsModel_inProgressRotationTask_appendsRotationSuffix() {
         val signer = createSigner()
         val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
-        every { multiNodeTasks.findInProgressTasks(any()) } returns listOf(taskWithIdentity(kid))
+        every { multiNodeTasks.findInProgressTasks(any()) } returns listOf(taskWithIdentity("$kid@task-1"))
 
         val model = mutableMapOf<String, Any>()
         signer.fillSettingsModel(model)
@@ -1427,7 +1451,8 @@ class BuiltInRSASignerTest : BaseTestCase() {
     fun fillSettingsModel_recentlyFinishedRotationTask_appendsRotationSuffix() {
         val signer = createSigner()
         val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
-        every { multiNodeTasks.findFinishedTasks(any(), 10000L) } returns listOf(taskWithIdentity(kid))
+        every { multiNodeTasks.findFinishedTasks(any(), 10000L) } returns
+            listOf(finishedTask("$kid@task-1", result = null))
 
         val model = mutableMapOf<String, Any>()
         signer.fillSettingsModel(model)
@@ -1445,5 +1470,102 @@ class BuiltInRSASignerTest : BaseTestCase() {
         signer.fillSettingsModel(model)
 
         Assertions.assertThat(model["keyFingerprint"]).isEqualTo("<will be generated on first use>")
+    }
+
+    /*
+     * getLatestKeyRotationError
+     */
+
+    @Test
+    fun getLatestKeyRotationError_noFinishedTasks_returnsNull() {
+        val signer = createSigner()
+        // relaxed multiNodeTasks returns empty lists for all find* calls
+        Assertions.assertThat(signer.getLatestKeyRotationError("kid-1")).isNull()
+    }
+
+    @Test
+    fun getLatestKeyRotationError_noFinishedTasksForKeyId_returnsNull() {
+        val signer = createSigner()
+        // A failed finished task exists, but for a different key.
+        every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
+            listOf(finishedTask("other-kid@task-1", result = "boom", lastActivityTime = 100L))
+
+        Assertions.assertThat(signer.getLatestKeyRotationError("kid-1")).isNull()
+    }
+
+    @Test
+    fun getLatestKeyRotationError_finishedTasksForKeyIdButEmptyResult_returnsNull() {
+        val signer = createSigner()
+        // Matching identity, but a null result means the task succeeded -- not an error.
+        every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
+            listOf(finishedTask("kid-1@task-1", result = null, lastActivityTime = 100L))
+
+        Assertions.assertThat(signer.getLatestKeyRotationError("kid-1")).isNull()
+    }
+
+    @Test
+    fun getLatestKeyRotationError_finishedErrorButProcessingTaskForSameKey_returnsNull() {
+        val signer = createSigner()
+        every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
+            listOf(finishedTask("kid-1@task-1", result = "boom", lastActivityTime = 100L))
+        // A pending task for the same key means a retry may still succeed: ignore the error.
+        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity("kid-1@task-2"))
+
+        Assertions.assertThat(signer.getLatestKeyRotationError("kid-1")).isNull()
+    }
+
+    @Test
+    fun getLatestKeyRotationError_multipleFinishedTasks_returnsLatestResult() {
+        val signer = createSigner()
+        // No processing tasks; the most recent failed task (by lastActivityTime) wins.
+        every { multiNodeTasks.findFinishedTasks(any(), any()) } returns listOf(
+            finishedTask("kid-1@task-1", result = "older error", lastActivityTime = 100L),
+            finishedTask("kid-1@task-3", result = "newest error", lastActivityTime = 300L),
+            finishedTask("kid-1@task-2", result = "middle error", lastActivityTime = 200L),
+        )
+
+        Assertions.assertThat(signer.getLatestKeyRotationError("kid-1")).isEqualTo("newest error")
+    }
+
+    /*
+     * fillSettingsModel last error
+     */
+
+    @Test
+    fun fillSettingsModel_lastErrorForExistingKey_addsKeyRotationLastError() {
+        val signer = createSigner()
+        val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
+        every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
+            listOf(finishedTask("$kid@task-1", result = "rotation failed", lastActivityTime = 100L))
+
+        val model = mutableMapOf<String, Any>()
+        signer.fillSettingsModel(model)
+
+        Assertions.assertThat(model["keyRotationLastError"]).isEqualTo("rotation failed")
+    }
+
+    @Test
+    fun fillSettingsModel_noLastErrorForExistingKey_doesNotAddKeyRotationLastError() {
+        val signer = createSigner()
+        makeSimpleJWT(signer)
+        // No finished failed tasks: relaxed multiNodeTasks returns empty lists.
+
+        val model = mutableMapOf<String, Any>()
+        signer.fillSettingsModel(model)
+
+        Assertions.assertThat(model).doesNotContainKey("keyRotationLastError")
+    }
+
+    @Test
+    fun fillSettingsModel_noCurrentKey_doesNotAddKeyRotationLastError() {
+        val signer = createSigner()
+        // No key on disk; a finished failed task exists but must be ignored without a current key.
+        every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
+            listOf(finishedTask("kid-1@task-1", result = "rotation failed", lastActivityTime = 100L))
+
+        val model = mutableMapOf<String, Any>()
+        signer.fillSettingsModel(model)
+
+        Assertions.assertThat(model).doesNotContainKey("keyRotationLastError")
     }
 }
