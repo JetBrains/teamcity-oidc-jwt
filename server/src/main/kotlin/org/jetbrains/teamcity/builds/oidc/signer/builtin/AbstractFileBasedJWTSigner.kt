@@ -1,9 +1,6 @@
 package org.jetbrains.teamcity.builds.oidc.signer.builtin
 
 import com.intellij.openapi.diagnostic.Logger
-import org.jetbrains.teamcity.builds.oidc.api.JWTSigner
-import org.jetbrains.teamcity.builds.oidc.api.JWTSignerAdminSettings
-import org.jetbrains.teamcity.builds.oidc.api.JWTSignerException
 import com.nimbusds.jose.JWSAlgorithm
 import com.nimbusds.jose.JWSHeader
 import com.nimbusds.jose.JWSObject
@@ -25,10 +22,14 @@ import jetbrains.buildServer.web.openapi.PluginDescriptor
 import jetbrains.buildServer.web.openapi.WebControllerManager
 import org.jetbrains.teamcity.builds.oidc.OIDCConstants.AbstractSigner.KEY_ROTATION_TASK_FINISH_THRESHOLD_MS
 import org.jetbrains.teamcity.builds.oidc.api.JWKCache
+import org.jetbrains.teamcity.builds.oidc.api.JWTSigner
+import org.jetbrains.teamcity.builds.oidc.api.JWTSignerAdminSettings
+import org.jetbrains.teamcity.builds.oidc.api.JWTSignerException
 import org.springframework.beans.factory.DisposableBean
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
@@ -143,15 +144,17 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
             throw JWTSignerException("Key rotation $currentKeyID is already in progress.")
         }
 
-        multiNodeTasks.submit(MultiNodeTasks.TaskData(rotationTaskType, currentKeyID))
+        // Identity needs to be randomized because tasks are marked as finished
+        // regardless of their outcome (success/failure).
+        multiNodeTasks.submit(MultiNodeTasks.TaskData(rotationTaskType, "${currentKeyID}@${UUID.randomUUID()}"))
     }
 
-    fun isKeyRotationInProgress(currentKey: String?): Boolean {
+    fun isKeyRotationInProgress(currentKey: String): Boolean {
         val taskType = listOf(rotationTaskType)
         val processingTasks = (multiNodeTasks.findPendingTasks(taskType)
                 + multiNodeTasks.findInProgressTasks(taskType)
                 + multiNodeTasks.findFinishedTasks(taskType, KEY_ROTATION_TASK_FINISH_THRESHOLD_MS))
-        return processingTasks.any { it.identity == currentKey }
+        return processingTasks.any { it.identity.startsWith(currentKey) }
     }
 
     override fun makeJWT(build: SBuild, claimsJSON: ByteArray, expiresAt: Instant): String {

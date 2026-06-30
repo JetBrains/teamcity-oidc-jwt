@@ -676,7 +676,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
         // Rotation is deferred to a multi-node task; the key file is untouched here.
         Assertions.assertThat(Files.exists(keyFilePath())).isTrue()
         verify(exactly = 1) {
-            multiNodeTasks.submit(match { it.type == "oidc-jwt-rotate-key-rsa" && it.identity == kid })
+            multiNodeTasks.submit(match { it.type == "oidc-jwt-rotate-key-rsa" && it.identity.startsWith("$kid@") })
         }
     }
 
@@ -767,7 +767,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
 
         Assertions.assertThat(currentSettings.jwsAlgorithm).isEqualTo("PS384")
         verify(exactly = 1) {
-            multiNodeTasks.submit(match { it.type == "oidc-jwt-rotate-key-rsa" && it.identity == kid })
+            multiNodeTasks.submit(match { it.type == "oidc-jwt-rotate-key-rsa" && it.identity.startsWith("$kid@") })
         }
 
         // After the deferred task runs, the new algorithm and key size take effect.
@@ -1272,8 +1272,9 @@ class BuiltInRSASignerTest : BaseTestCase() {
 
         val submitted = slot<MultiNodeTasks.Task>()
         verify(exactly = 1) { multiNodeTasks.submit(capture(submitted)) }
-        Assertions.assertThat(submitted.captured.identity).isEqualTo(newKey.keyID)
-        Assertions.assertThat(submitted.captured.identity).isNotEqualTo(kid1)
+        // Identity is "${keyID}@${random UUID}", so the prefix is the fresh key ID, not the cached one.
+        Assertions.assertThat(submitted.captured.identity).startsWith("${newKey.keyID}@")
+        Assertions.assertThat(submitted.captured.identity).doesNotStartWith(kid1)
     }
 
     @Test
@@ -1308,7 +1309,7 @@ class BuiltInRSASignerTest : BaseTestCase() {
         signer.requestKeyRotation()
 
         verify(exactly = 1) {
-            multiNodeTasks.submit(match { it.type == "oidc-jwt-rotate-key-rsa" && it.identity == kid })
+            multiNodeTasks.submit(match { it.type == "oidc-jwt-rotate-key-rsa" && it.identity.startsWith("$kid@") })
         }
     }
 
