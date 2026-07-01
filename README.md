@@ -50,12 +50,12 @@ if the timeout is not set.
 ### OIDC Token (on demand via HTTP request)
 
 Build configurations with this build feature can generate short-lived JWTs during the build
-by sending a request to an endpoint provided via the `teamcity.build.oidc.endpoint` build parameter.
+by sending a request to `%teamcity.serverUrl%/app/oidc-jwt/issue?aud=...`.
 The caller is expected to use [build-level authentication credentials](https://www.jetbrains.com/help/teamcity/artifact-dependencies.html#build-level-auth)
 like so:
 
 ```sh
-curl -u "%system.teamcity.auth.userId%:%system.teamcity.auth.password%" "%teamcity.build.oidc.endpoint%" --get --data-urlencode="aud=https://teamcity.example.com/app/oidc-jwt"
+curl -u "%system.teamcity.auth.userId%:%system.teamcity.auth.password%" "%teamcity.serverUrl%/app/oidc-jwt/issue" --get --data-urlencode="aud=https://teamcity.example.com/app/oidc-jwt"
 ```
 
 The requester can issue tokens for multiple audiences by providing multiple `aud` query parameters.

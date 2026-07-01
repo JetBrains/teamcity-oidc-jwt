@@ -149,25 +149,6 @@ class OIDCTokenBuildStartContextProcessorTest : BaseTestCase() {
     }
 
     @Test
-    fun updateParameters_onDemandFeaturesPresent_addsEndpointUrlParam() {
-        val buildServer = mockk<SBuildServer> {
-            every { rootUrl } returns "https://teamcity.example.com"
-        }
-        val processor = OIDCTokenBuildStartContextProcessor(
-            mockk(), mockk(), mockk(), mockk(), buildServer, fixedClock
-        )
-        val build = mockBuild(onDemandFeatures = listOf(mockk()))
-        val context = mockContext(build)
-
-        processor.updateParameters(context)
-
-        verify(exactly = 1) { context.addSharedParameter(
-            "teamcity.build.oidc.endpoint",
-            "https://teamcity.example.com/app/oidc-jwt/issue"
-        ) }
-    }
-
-    @Test
     fun updateParameters_noInParamsFeatures_doesNotCallSignerOrProjectManager() {
         val projectManager = mockk<ProjectManager>()
         val registry = mockk<JWTSignerRegistry>()
@@ -532,24 +513,6 @@ class OIDCTokenBuildStartContextProcessorTest : BaseTestCase() {
     }
 
     @Test
-    fun updateParameters_onDemandAndInParamsFeatures_bothHandled() {
-        val setup = createTokenIssuingSetup()
-        val build = mockBuild(
-            onDemandFeatures = listOf(mockk()),
-            inParamsFeatures = listOf(createInParamsDescriptor(buildParam = "my.param")),
-        )
-        val context = mockContext(build)
-
-        setup.processor.updateParameters(context)
-
-        verify(exactly = 1) { context.addSharedParameter(
-            "teamcity.build.oidc.endpoint",
-            "https://teamcity.example.com/app/oidc-jwt/issue"
-        ) }
-        verify(exactly = 1) { context.addSharedParameter("my.param", "signed-jwt") }
-    }
-
-    @Test
     fun getConstraint_returnsBeforePasswordsBuildStartContextProcessor() {
         val processor = OIDCTokenBuildStartContextProcessor(
             mockk(), mockk(), mockk(), mockk(), mockk(), fixedClock
@@ -648,80 +611,5 @@ class OIDCTokenBuildStartContextProcessorTest : BaseTestCase() {
         every { build.buildPromotion } returns buildPromotion
 
         return build
-    }
-
-    @Test
-    fun updateParameters_ownerNodeCanAcceptHTTP_endpointUsesOwnerNodeUrl() {
-        val buildServer = mockk<SBuildServer> {
-            every { rootUrl } returns "https://teamcity.example.com"
-        }
-        val processor = OIDCTokenBuildStartContextProcessor(
-            mockk(), mockk(), mockk(), mockk(), buildServer, fixedClock
-        )
-        val ownerNode = mockOwnerNode("https://node1.example.com/", canAcceptHTTP = true)
-        val build = mockBuildWithOwnerNode(ownerNode = ownerNode)
-        val context = mockContext(build)
-
-        processor.updateParameters(context)
-
-        val expectedEndpoint = "https://node1.example.com/app/oidc-jwt/issue"
-        verify(exactly = 1) { context.addSharedParameter("teamcity.build.oidc.endpoint", expectedEndpoint) }
-    }
-
-    @Test
-    fun updateParameters_ownerNodeCannotAcceptHTTP_endpointUsesServerUrlParam() {
-        val buildServer = mockk<SBuildServer> {
-            every { rootUrl } returns "https://teamcity.example.com"
-        }
-        val processor = OIDCTokenBuildStartContextProcessor(
-            mockk(), mockk(), mockk(), mockk(), buildServer, fixedClock
-        )
-        val ownerNode = mockOwnerNode("https://node1.example.com", canAcceptHTTP = false)
-        val build = mockBuildWithOwnerNode(
-            ownerNode = ownerNode,
-            serverUrlParam = "https://from-params.example.com/"
-        )
-        val context = mockContext(build)
-
-        processor.updateParameters(context)
-
-        val expectedEndpoint = "https://from-params.example.com/app/oidc-jwt/issue"
-        verify(exactly = 1) { context.addSharedParameter("teamcity.build.oidc.endpoint", expectedEndpoint) }
-    }
-
-    @Test
-    fun updateParameters_noServerUrlParam_endpointFallsBackToRootUrl() {
-        val buildServer = mockk<SBuildServer> {
-            every { rootUrl } returns "https://teamcity.example.com/"
-        }
-        val processor = OIDCTokenBuildStartContextProcessor(
-            mockk(), mockk(), mockk(), mockk(), buildServer, fixedClock
-        )
-        val ownerNode = mockOwnerNode("https://node1.example.com", canAcceptHTTP = false)
-        val build = mockBuildWithOwnerNode(ownerNode = ownerNode, serverUrlParam = null)
-        val context = mockContext(build)
-
-        processor.updateParameters(context)
-
-        val expectedEndpoint = "https://teamcity.example.com/app/oidc-jwt/issue"
-        verify(exactly = 1) { context.addSharedParameter("teamcity.build.oidc.endpoint", expectedEndpoint) }
-    }
-
-    @Test
-    fun updateParameters_blankServerUrlParam_endpointFallsBackToRootUrl() {
-        val buildServer = mockk<SBuildServer> {
-            every { rootUrl } returns "https://teamcity.example.com/"
-        }
-        val processor = OIDCTokenBuildStartContextProcessor(
-            mockk(), mockk(), mockk(), mockk(), buildServer, fixedClock
-        )
-        val ownerNode = mockOwnerNode("https://node1.example.com", canAcceptHTTP = false)
-        val build = mockBuildWithOwnerNode(ownerNode = ownerNode, serverUrlParam = "  ")
-        val context = mockContext(build)
-
-        processor.updateParameters(context)
-
-        val expectedEndpoint = "https://teamcity.example.com/app/oidc-jwt/issue"
-        verify(exactly = 1) { context.addSharedParameter("teamcity.build.oidc.endpoint", expectedEndpoint) }
     }
 }

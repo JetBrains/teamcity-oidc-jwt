@@ -11,7 +11,6 @@
   <td colspan="2">
     <em>
       This build feature allows builds to issue short-lived JWTs via GET requests with <a href="https://www.jetbrains.com/help/teamcity/artifact-dependencies.html#build-level-auth" target="_blank">build-level authentication credentials</a>.
-      The endpoint to call is provided in <code><c:out value="${onDemandUrlParam}" /></code> build parameter.
       <br/><br/>
       If you would like to provide the token via build parameters or issue tokens with a longer lifetime, please use <code><c:out value="${inParamsDisplayName}" /></code> build feature instead.
     </em>
@@ -42,8 +41,17 @@
   </td>
 </tr>
 </c:if>
+<tr>
+  <th><label for="oidcEndpoint">Token issuer endpoint:</label></th>
+  <td>
+    <div id="clipboardEndpoint" class="clipboard-btn tc-icon icon16 tc-icon_copy" data-clipboard-action="copy"
+         data-clipboard-target="#oidcEndpoint"></div><code id="oidcEndpoint"><c:out value="${onDemandUrlParam}"/></code>
+    <span class="smallNote">Use this snippet in your build script with <a href="https://www.jetbrains.com/help/teamcity/artifact-dependencies.html#build-level-auth" target="_blank">build-level auth credentials</a> (<code>system.teamcity.auth.userId</code> and <code>system.teamcity.auth.password</code> basic auth).</span>
+  </td>
+</tr>
 
 <script type="text/javascript">
   BS.Clipboard('#clipboardOidcIssuer');
   BS.Clipboard('#clipboardSub');
+  BS.Clipboard('#clipboardEndpoint');
 </script>

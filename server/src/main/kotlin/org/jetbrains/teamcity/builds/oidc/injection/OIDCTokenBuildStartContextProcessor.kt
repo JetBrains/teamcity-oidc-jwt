@@ -69,28 +69,8 @@ class OIDCTokenBuildStartContextProcessor @JvmOverloads constructor(
     // The calls of context processors seemingly happen within the same node, so we store them in a hashmap.
     private val issuedTokens = ConcurrentHashMap<Long, List<IssuedToken>>()
 
-    private fun getOwnerNodeRootUrl(build: SBuild): String {
-        val result = build.buildPromotion.let {
-            if (it is BuildPromotionEx && it.ownerNode?.canAcceptHTTPRequests() == true) {
-                it.ownerNode?.url
-            } else {
-                build.parametersProvider.get("teamcity.serverUrl")?.ifBlank { null }
-            }
-        } ?: buildServer.rootUrl
-        return result.removeSuffix("/")
-    }
-
     override fun updateParameters(context: BuildStartContext) {
         val build = context.build
-
-        // Provide on-demand endpoint URL via parameter if any on-demand build features are present
-        val onDemandTokens = build.oidcOnDemandBuildFeatures().isNotEmpty()
-        if (onDemandTokens) {
-            val rootUrl = getOwnerNodeRootUrl(build)
-            val endpointUrl =
-                "${rootUrl}${OIDCConstants.OIDC_ROOT_URL}/${OIDCConstants.BuildFeatureOnDemand.CONTROLLER_ROOT}"
-            context.addSharedParameter(OIDCConstants.BuildFeatureOnDemand.ENDPOINT_URL_PARAM, endpointUrl)
-        }
 
         // Exit early if no in-param build features are present
         val features = build.oidcInParamsBuildFeatures()

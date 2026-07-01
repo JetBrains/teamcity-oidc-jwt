@@ -87,7 +87,7 @@ class OIDCTokenOnDemandBuildFeatureControllerTest : BaseTestCase() {
         Assertions.assertThat(mv.model["sub"]).isEqualTo("_Root:MyProject:bt1")
         Assertions.assertThat(mv.model["jwksURL"]).isEqualTo("/app/oidc-jwt/.well-known/jwks?currentOnly=true")
         Assertions.assertThat(mv.model["jwksFilename"]).isEqualTo("issuer.example.com_jwks.json")
-        Assertions.assertThat(mv.model["onDemandUrlParam"]).isEqualTo("teamcity.build.oidc.endpoint")
+        Assertions.assertThat(mv.model["onDemandUrlParam"]).isEqualTo("%teamcity.serverUrl%/app/oidc-jwt/issue")
     }
 
     @Test
@@ -98,7 +98,7 @@ class OIDCTokenOnDemandBuildFeatureControllerTest : BaseTestCase() {
         Assertions.assertThat(mv.model["issuer"]).isEqualTo("https://issuer.example.com")
         Assertions.assertThat(mv.model["jwksURL"]).isEqualTo("/app/oidc-jwt/.well-known/jwks?currentOnly=true")
         Assertions.assertThat(mv.model["jwksFilename"]).isEqualTo("issuer.example.com_jwks.json")
-        Assertions.assertThat(mv.model["onDemandUrlParam"]).isEqualTo("teamcity.build.oidc.endpoint")
+        Assertions.assertThat(mv.model["onDemandUrlParam"]).isEqualTo("%teamcity.serverUrl%/app/oidc-jwt/issue")
     }
 
     @Test
@@ -111,7 +111,7 @@ class OIDCTokenOnDemandBuildFeatureControllerTest : BaseTestCase() {
         Assertions.assertThat(mv.model["issuer"]).isEqualTo("https://issuer.example.com")
         Assertions.assertThat(mv.model["jwksURL"]).isEqualTo("/app/oidc-jwt/.well-known/jwks?currentOnly=true")
         Assertions.assertThat(mv.model["jwksFilename"]).isEqualTo("issuer.example.com_jwks.json")
-        Assertions.assertThat(mv.model["onDemandUrlParam"]).isEqualTo("teamcity.build.oidc.endpoint")
+        Assertions.assertThat(mv.model["onDemandUrlParam"]).isEqualTo("%teamcity.serverUrl%/app/oidc-jwt/issue")
     }
 
     @Test
@@ -127,6 +127,6 @@ class OIDCTokenOnDemandBuildFeatureControllerTest : BaseTestCase() {
         Assertions.assertThat(mv.model["issuer"]).isEqualTo("https://issuer.example.com")
         Assertions.assertThat(mv.model["jwksURL"]).isEqualTo("/app/oidc-jwt/.well-known/jwks?currentOnly=true")
         Assertions.assertThat(mv.model["jwksFilename"]).isEqualTo("issuer.example.com_jwks.json")
-        Assertions.assertThat(mv.model["onDemandUrlParam"]).isEqualTo("teamcity.build.oidc.endpoint")
+        Assertions.assertThat(mv.model["onDemandUrlParam"]).isEqualTo("%teamcity.serverUrl%/app/oidc-jwt/issue")
     }
 }
