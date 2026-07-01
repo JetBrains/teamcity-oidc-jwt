@@ -134,12 +134,7 @@ using the `JWT signature algorithm` dropdown.
 
 ### Key rotation
 
-Both built-in signers support key rotation via authorized HTTP requests. For manual rotation, use the "Rotate key now"
-button in the signer settings. For programmatic rotation, make a POST request to
-- `/app/oidc-jwt/builtin-rsa/rotate` (for `Built-in (RSA)` signer)
-- `/app/oidc-jwt/builtin-ecdsa/rotate` (for `Built-in (ECDSA)` signer)
-
-The request must be authorized with `Change server settings` permission.
+Both built-in signers support key rotation via HTTP requests authorized with `Change server settings` permission.
 
 > [!WARNING]
 > Rotating the key in any way will NOT invalidate existing tokens due to JWK caching. Use the "Purge JWK cache" button
@@ -147,9 +142,41 @@ The request must be authorized with `Change server settings` permission.
 > signed with old keys.
 
 > [!NOTE]
-> Remember that installations that host their JWKS elsewhere (as described in the 
+> Remember that installations that host their JWKS elsewhere (as described in the
 > [Support for installations inaccessible from the internet](#Support-for-installations-inaccessible-from-the-internet) section)
 > will need to have their externally hosted JWKS JSON files updated as well for new tokens to be valid.
+
+#### Manual rotation
+
+For manual rotation, use the "Rotate key now" button on the signer settings page. This will schedule a rotation task.
+If the task fails for some reason, an error message will be displayed on the settings page on reload.
+
+#### Programmatic rotation
+
+To schedule a rotation task programmatically, make a request with valid credentials to one of the following endpoints:
+- `/app/oidc-jwt/builtin-rsa/rotate` (for `Built-in (RSA)` signer)
+- `/app/oidc-jwt/builtin-ecdsa/rotate` (for `Built-in (ECDSA)` signer)
+
+Just like with the manual rotation, the requester must be authorized with `Change server settings` permission.
+
+When the task is scheduled successfully, both endpoints will return a response with a task ID:
+```
+$ curl -H "Authorization: Bearer $TC_TOKEN" -X POST "$TC_HOST/app/oidc-jwt/builtin-rsa/rotate"
+<response><task id="214617" /></response>%
+```
+
+You can use said ID to check the task status with a `GET` request to the same endpoint:
+```
+$ curl -H "Authorization: Bearer $TC_TOKEN" "$TC_HOST/app/oidc-jwt/builtin-rsa/rotate?taskID=214617"
+<response><task id="214617" status="Success" /></response>%
+```
+
+Possible states:
+- `Pending`: key rotation task is yet to be assigned to an executor
+- `In progress on {node ID}`: a node currently processes the key rotation task
+- `Success`: key successfully rotated
+- `Failed: {error message}`: key rotation failed
+- `Cancelled`: key rotation was canceled. Normally, this state should not be seen.
 
 ## Support for additional JWT signers
 
