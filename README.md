@@ -26,7 +26,7 @@ Requires Java 17. Supports TeamCity 2025.11.1 and later.
 - Kotlin DSL bindings
 
 ## Quick Start
-Download the latest release [here](https://github.com/JetBrains/sre-teamcity-jwt/releases/latest) or [build from source](#Build),
+Download the latest release or [build from source](#Build),
 [install it](https://www.jetbrains.com/help/teamcity/installing-additional-plugins.html), then use one of the following build features:
 
 - `OIDC Token (in build parameters)` to pass the generated token via build parameters (or environment variables) on build start.
