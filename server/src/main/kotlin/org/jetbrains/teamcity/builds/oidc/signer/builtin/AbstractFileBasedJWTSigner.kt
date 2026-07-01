@@ -18,6 +18,7 @@ import jetbrains.buildServer.serverSide.ServerResponsibility
 import jetbrains.buildServer.serverSide.TeamCityNodes
 import jetbrains.buildServer.serverSide.crypt.Encryption
 import jetbrains.buildServer.util.Dates
+import jetbrains.buildServer.util.FileUtil
 import jetbrains.buildServer.web.openapi.PluginDescriptor
 import jetbrains.buildServer.web.openapi.WebControllerManager
 import org.jetbrains.teamcity.builds.oidc.OIDCConstants.AbstractSigner.KEY_ROTATION_TASK_FINISH_THRESHOLD_MS
@@ -102,7 +103,7 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
     protected fun saveKey(key: K, path: Path) = IOGuard.allowDiskWrite<Exception> {
         Files.createDirectories(path.parent)
         val encrypted = encryption.encrypt(key.toJSONString())
-        Files.writeString(path, encrypted)
+        FileUtil.writeViaTmpFile(path.toFile(), encrypted.byteInputStream()) {}
     }
 
     protected fun getKey(generateIfMissing: Boolean): K? {
