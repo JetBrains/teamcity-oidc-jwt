@@ -61,6 +61,8 @@ curl -u "%system.teamcity.auth.userId%:%system.teamcity.auth.password%" "%teamci
 The requester can issue tokens for multiple audiences by providing multiple `aud` query parameters.
 The list of allowed `aud` claims can be specified in the build feature settings.
 
+When no `aud` query parameter is provided, the issued token will contain all allowed audiences.
+
 Tokens generated this way are valid for 5 minutes.
 
 ## Configuration
