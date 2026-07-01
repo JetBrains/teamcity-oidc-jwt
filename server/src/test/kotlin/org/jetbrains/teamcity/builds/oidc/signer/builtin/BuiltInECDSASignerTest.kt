@@ -131,12 +131,12 @@ class BuiltInECDSASignerTest : BaseTestCase() {
 
     private fun captureRotationConsumer(): MultiNodeTasks.TaskConsumer {
         val slot = slot<MultiNodeTasks.TaskConsumer>()
-        verify { multiNodeTasks.subscribeOnSingletonTask(any(), capture(slot)) }
+        verify { multiNodeTasks.subscribe(any(), capture(slot)) }
         return slot.captured
     }
 
     private fun rotationTask(keyID: String): MultiNodeTasks.PerformingTask =
-        mockk(relaxed = true) { every { identity } returns "$keyID@test-rotation" }
+        mockk(relaxed = true) { every { identity } returns keyID }
 
     private fun driveRotationTask(consumer: MultiNodeTasks.TaskConsumer, keyID: String) {
         // Honor the framework contract: accept() runs only if beforeAccept() is true.
@@ -612,7 +612,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         // Rotation is deferred to a multi-node task; the key file is untouched here.
         Assertions.assertThat(Files.exists(keyFilePath())).isTrue()
         verify(exactly = 1) {
-            multiNodeTasks.submit(match { it.type == "oidc-jwt-rotate-key-ecdsa" && it.identity.startsWith("$kid@") })
+            multiNodeTasks.submit(match { it.type == "oidc-jwt-rotate-key-ecdsa" && it.identity == kid })
         }
     }
 
@@ -973,7 +973,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     fun init_subscribesToRotationTask() {
         createSigner()
         verify(exactly = 1) {
-            multiNodeTasks.subscribeOnSingletonTask(eq("oidc-jwt-rotate-key-ecdsa"), any())
+            multiNodeTasks.subscribe(eq("oidc-jwt-rotate-key-ecdsa"), any())
         }
     }
 
@@ -1113,11 +1113,13 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         result: String? = null,
         isDone: Boolean = false,
         executorNodeId: String? = null,
+        id: Int = 0,
     ): MultiNodeTasks.SubmittedTask = mockk {
         every { this@mockk.isDoneSuccessfully } returns isDoneSuccessfully
         every { this@mockk.result } returns result
         every { this@mockk.isDone } returns isDone
         every { this@mockk.executorNodeId } returns executorNodeId
+        every { this@mockk.id } returns id
     }
 
     private fun finishedTask(
@@ -1137,8 +1139,8 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     @Test
     fun isKeyRotationInProgress_pendingTaskWithMatchingIdentity_returnsTrue() {
         val signer = createSigner()
-        // Task identities are "${keyID}@${random}", so the key id is matched as a prefix.
-        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity("kid-1@task-1"))
+        // The task identity is the key id, matched by exact equality.
+        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity("kid-1"))
 
         Assertions.assertThat(signer.isKeyRotationInProgress("kid-1")).isTrue()
     }
@@ -1153,7 +1155,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     @Test
     fun isKeyRotationInProgress_inProgressTaskWithMatchingIdentity_returnsTrue() {
         val signer = createSigner()
-        every { multiNodeTasks.findInProgressTasks(any()) } returns listOf(taskWithIdentity("kid-1@task-1"))
+        every { multiNodeTasks.findInProgressTasks(any()) } returns listOf(taskWithIdentity("kid-1"))
 
         Assertions.assertThat(signer.isKeyRotationInProgress("kid-1")).isTrue()
     }
@@ -1163,7 +1165,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         val signer = createSigner()
         // Only finished tasks with a null result (succeeded) count, covering the cache-refresh gap.
         every { multiNodeTasks.findFinishedTasks(any(), 10000L) } returns
-            listOf(finishedTask("kid-1@task-1", result = null))
+            listOf(finishedTask("kid-1", result = null))
 
         Assertions.assertThat(signer.isKeyRotationInProgress("kid-1")).isTrue()
         verify { multiNodeTasks.findFinishedTasks(any(), 10000L) }
@@ -1174,7 +1176,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         val signer = createSigner()
         // A finished task with a non-null result is a failure, not an in-progress rotation.
         every { multiNodeTasks.findFinishedTasks(any(), 10000L) } returns
-            listOf(finishedTask("kid-1@task-1", result = "boom"))
+            listOf(finishedTask("kid-1", result = "boom"))
 
         Assertions.assertThat(signer.isKeyRotationInProgress("kid-1")).isFalse()
     }
@@ -1196,9 +1198,8 @@ class BuiltInECDSASignerTest : BaseTestCase() {
 
         val submitted = slot<MultiNodeTasks.Task>()
         verify(exactly = 1) { multiNodeTasks.submit(capture(submitted)) }
-        // Identity is "${keyID}@${random UUID}", so the prefix is the fresh key ID, not the cached one.
-        Assertions.assertThat(submitted.captured.identity).startsWith("${newKey.keyID}@")
-        Assertions.assertThat(submitted.captured.identity).doesNotStartWith(kid1)
+        Assertions.assertThat(submitted.captured.identity).isEqualTo(newKey.keyID)
+        Assertions.assertThat(submitted.captured.identity).isNotEqualTo(kid1)
     }
 
     @Test
@@ -1218,7 +1219,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     fun requestKeyRotation_rotationAlreadyInProgress_throwsAndDoesNotSubmit() {
         val signer = createSigner()
         val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
-        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity("$kid@task-1"))
+        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity(kid))
 
         Assertions.catchThrowableOfType(
             { signer.requestKeyRotation() },
@@ -1236,7 +1237,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         signer.requestKeyRotation()
 
         verify(exactly = 1) {
-            multiNodeTasks.submit(match { it.type == "oidc-jwt-rotate-key-ecdsa" && it.identity.startsWith("$kid@") })
+            multiNodeTasks.submit(match { it.type == "oidc-jwt-rotate-key-ecdsa" && it.identity == kid })
         }
     }
 
@@ -1244,11 +1245,12 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     fun requestKeyRotation_keyPresent_returnsSubmittedTaskID() {
         val signer = createSigner()
         val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
+        every { multiNodeTasks.submit(any()) } returns submittedTask(id = 42)
 
         val taskID = signer.requestKeyRotation()
 
-        verify(exactly = 1) { multiNodeTasks.submit(match { it.identity == taskID }) }
-        Assertions.assertThat(taskID).startsWith("$kid@")
+        verify(exactly = 1) { multiNodeTasks.submit(match { it.identity == kid }) }
+        Assertions.assertThat(taskID).isEqualTo("42")
     }
 
     /*
@@ -1258,53 +1260,53 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     @Test
     fun rotationTaskStatus_taskNotFound_returnsNull() {
         val signer = createSigner()
-        every { multiNodeTasks.findTask("oidc-jwt-rotate-key-ecdsa", "task-1") } returns null
+        every { multiNodeTasks.findTaskById(1) } returns null
 
-        Assertions.assertThat(signer.rotationTaskStatus("task-1")).isNull()
+        Assertions.assertThat(signer.rotationTaskStatus(1)).isNull()
     }
 
     @Test
     fun rotationTaskStatus_doneSuccessfullyWithResult_returnsFailedWithReason() {
         val signer = createSigner()
-        every { multiNodeTasks.findTask("oidc-jwt-rotate-key-ecdsa", "task-1") } returns
+        every { multiNodeTasks.findTaskById(1) } returns
             submittedTask(isDoneSuccessfully = true, result = "boom")
 
-        Assertions.assertThat(signer.rotationTaskStatus("task-1")).isEqualTo("Failed: boom")
+        Assertions.assertThat(signer.rotationTaskStatus(1)).isEqualTo("Failed: boom")
     }
 
     @Test
     fun rotationTaskStatus_doneSuccessfully_returnsSuccess() {
         val signer = createSigner()
-        every { multiNodeTasks.findTask("oidc-jwt-rotate-key-ecdsa", "task-1") } returns
+        every { multiNodeTasks.findTaskById(1) } returns
             submittedTask(isDoneSuccessfully = true, result = null)
 
-        Assertions.assertThat(signer.rotationTaskStatus("task-1")).isEqualTo("Success")
+        Assertions.assertThat(signer.rotationTaskStatus(1)).isEqualTo("Success")
     }
 
     @Test
     fun rotationTaskStatus_doneButNotSuccessfully_returnsCancelled() {
         val signer = createSigner()
-        every { multiNodeTasks.findTask("oidc-jwt-rotate-key-ecdsa", "task-1") } returns
+        every { multiNodeTasks.findTaskById(1) } returns
             submittedTask(isDone = true)
 
-        Assertions.assertThat(signer.rotationTaskStatus("task-1")).isEqualTo("Cancelled")
+        Assertions.assertThat(signer.rotationTaskStatus(1)).isEqualTo("Cancelled")
     }
 
     @Test
     fun rotationTaskStatus_assignedToNodeNotDone_returnsInProgress() {
         val signer = createSigner()
-        every { multiNodeTasks.findTask("oidc-jwt-rotate-key-ecdsa", "task-1") } returns
+        every { multiNodeTasks.findTaskById(1) } returns
             submittedTask(executorNodeId = "node-7")
 
-        Assertions.assertThat(signer.rotationTaskStatus("task-1")).isEqualTo("In progress on node-7")
+        Assertions.assertThat(signer.rotationTaskStatus(1)).isEqualTo("In progress on node-7")
     }
 
     @Test
     fun rotationTaskStatus_pendingTask_returnsPending() {
         val signer = createSigner()
-        every { multiNodeTasks.findTask("oidc-jwt-rotate-key-ecdsa", "task-1") } returns submittedTask()
+        every { multiNodeTasks.findTaskById(1) } returns submittedTask()
 
-        Assertions.assertThat(signer.rotationTaskStatus("task-1")).isEqualTo("Pending")
+        Assertions.assertThat(signer.rotationTaskStatus(1)).isEqualTo("Pending")
     }
 
     /*
@@ -1315,7 +1317,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     fun fillSettingsModel_pendingRotationTask_appendsRotationSuffix() {
         val signer = createSigner()
         val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
-        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity("$kid@task-1"))
+        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity(kid))
 
         val model = mutableMapOf<String, Any>()
         signer.fillSettingsModel(model)
@@ -1327,7 +1329,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     fun fillSettingsModel_inProgressRotationTask_appendsRotationSuffix() {
         val signer = createSigner()
         val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
-        every { multiNodeTasks.findInProgressTasks(any()) } returns listOf(taskWithIdentity("$kid@task-1"))
+        every { multiNodeTasks.findInProgressTasks(any()) } returns listOf(taskWithIdentity(kid))
 
         val model = mutableMapOf<String, Any>()
         signer.fillSettingsModel(model)
@@ -1340,7 +1342,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         val signer = createSigner()
         val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
         every { multiNodeTasks.findFinishedTasks(any(), 10000L) } returns
-            listOf(finishedTask("$kid@task-1", result = null))
+            listOf(finishedTask(kid, result = null))
 
         val model = mutableMapOf<String, Any>()
         signer.fillSettingsModel(model)
@@ -1376,7 +1378,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         val signer = createSigner()
         // A failed finished task exists, but for a different key.
         every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
-            listOf(finishedTask("other-kid@task-1", result = "boom", lastActivityTime = 100L))
+            listOf(finishedTask("other-kid", result = "boom", lastActivityTime = 100L))
 
         Assertions.assertThat(signer.getLatestKeyRotationError("kid-1")).isNull()
     }
@@ -1386,7 +1388,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         val signer = createSigner()
         // Matching identity, but a null result means the task succeeded -- not an error.
         every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
-            listOf(finishedTask("kid-1@task-1", result = null, lastActivityTime = 100L))
+            listOf(finishedTask("kid-1", result = null, lastActivityTime = 100L))
 
         Assertions.assertThat(signer.getLatestKeyRotationError("kid-1")).isNull()
     }
@@ -1395,9 +1397,9 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     fun getLatestKeyRotationError_finishedErrorButProcessingTaskForSameKey_returnsNull() {
         val signer = createSigner()
         every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
-            listOf(finishedTask("kid-1@task-1", result = "boom", lastActivityTime = 100L))
+            listOf(finishedTask("kid-1", result = "boom", lastActivityTime = 100L))
         // A pending task for the same key means a retry may still succeed: ignore the error.
-        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity("kid-1@task-2"))
+        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity("kid-1"))
 
         Assertions.assertThat(signer.getLatestKeyRotationError("kid-1")).isNull()
     }
@@ -1407,9 +1409,9 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         val signer = createSigner()
         // No processing tasks; the most recent failed task (by lastActivityTime) wins.
         every { multiNodeTasks.findFinishedTasks(any(), any()) } returns listOf(
-            finishedTask("kid-1@task-1", result = "older error", lastActivityTime = 100L),
-            finishedTask("kid-1@task-3", result = "newest error", lastActivityTime = 300L),
-            finishedTask("kid-1@task-2", result = "middle error", lastActivityTime = 200L),
+            finishedTask("kid-1", result = "older error", lastActivityTime = 100L),
+            finishedTask("kid-1", result = "newest error", lastActivityTime = 300L),
+            finishedTask("kid-1", result = "middle error", lastActivityTime = 200L),
         )
 
         Assertions.assertThat(signer.getLatestKeyRotationError("kid-1")).isEqualTo("newest error")
@@ -1424,7 +1426,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         val signer = createSigner()
         val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
         every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
-            listOf(finishedTask("$kid@task-1", result = "rotation failed", lastActivityTime = 100L))
+            listOf(finishedTask(kid, result = "rotation failed", lastActivityTime = 100L))
 
         val model = mutableMapOf<String, Any>()
         signer.fillSettingsModel(model)
@@ -1449,7 +1451,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         val signer = createSigner()
         // No key on disk; a finished failed task exists but must be ignored without a current key.
         every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
-            listOf(finishedTask("kid-1@task-1", result = "rotation failed", lastActivityTime = 100L))
+            listOf(finishedTask("kid-1", result = "rotation failed", lastActivityTime = 100L))
 
         val model = mutableMapOf<String, Any>()
         signer.fillSettingsModel(model)

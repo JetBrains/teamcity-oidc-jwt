@@ -55,7 +55,17 @@ class BuiltInRotationController(
             return null
         }
 
-        val status = signer.rotationTaskStatus(taskID)
+        val intTaskID = try {
+            Integer.parseInt(taskID)
+        } catch (e: NumberFormatException) {
+            errors.addError("taskID", "`taskID` parameter must be an integer")
+            errors.serialize(xmlResponse)
+            response.status = 404
+            XmlResponseUtil.writeXmlResponse(xmlResponse, response)
+            return null
+        }
+
+        val status = signer.rotationTaskStatus(intTaskID)
         if (status == null) {
             errors.addError("taskID", "Unknown task ID")
             errors.serialize(xmlResponse)

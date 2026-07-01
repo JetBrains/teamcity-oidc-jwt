@@ -29,7 +29,6 @@ import org.springframework.beans.factory.DisposableBean
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
-import java.util.UUID
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
@@ -71,7 +70,7 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
         fileWatcher.registerListener(this)
         fileWatcher.start()
 
-        multiNodeTasks.subscribeOnSingletonTask(rotationTaskType, RotationTaskConsumer())
+        multiNodeTasks.subscribe(rotationTaskType, RotationTaskConsumer())
     }
 
     /** JWS algorithm to use and advertise. */
@@ -144,11 +143,8 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
             throw JWTSignerException("Key rotation $currentKeyID is already in progress.")
         }
 
-        // Identity needs to be randomized because tasks are marked as finished
-        // regardless of their outcome (success/failure).
-        val taskID = "${currentKeyID}@${UUID.randomUUID()}"
-        multiNodeTasks.submit(MultiNodeTasks.TaskData(rotationTaskType, taskID))
-        return taskID
+        val task = multiNodeTasks.submit(MultiNodeTasks.TaskData(rotationTaskType, currentKeyID))
+        return "${task.id}"
     }
 
     fun isKeyRotationInProgress(currentKey: String): Boolean {
@@ -162,8 +158,7 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
         val finishedSucceededTasks = multiNodeTasks.findFinishedTasks(taskType, KEY_ROTATION_TASK_FINISH_THRESHOLD_MS)
             .filter { it.result?.isEmpty() ?: true }
         val inProgressTasks = processingTasks + finishedSucceededTasks
-        val identityPrefix = "$currentKey@"
-        return inProgressTasks.any { it.identity.startsWith(identityPrefix) }
+        return inProgressTasks.any { it.identity == currentKey }
     }
 
     fun getLatestKeyRotationError(currentKey: String): String? {
@@ -175,25 +170,23 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
         if (finishedTasks.isEmpty()) return null
 
         // Get the latest failed finished task
-        val identityPrefix = "$currentKey@"
-
         // Emptiness check is a workaround: when `t?.finished()` is called, `getResult` on that task throws an NPE
         val latestFailedTask = finishedTasks
-            .filter { it.identity.startsWith(identityPrefix) && it.result?.isNotEmpty() ?: false }
+            .filter { it.identity == currentKey && it.result?.isNotEmpty() ?: false }
             .maxByOrNull { it.lastActivityTime?.time ?: 0 } ?: return null
 
         // There is at least one failed task. However, let's also check if there are any tasks in progress.
         // If there are, ignore the error (it's in progress, perhaps it will not fail).
         val processingTasks = (multiNodeTasks.findPendingTasks(taskType)
-                + multiNodeTasks.findInProgressTasks(taskType)).filter { it.identity.startsWith(identityPrefix) }
+                + multiNodeTasks.findInProgressTasks(taskType)).filter { it.identity == currentKey }
         if (processingTasks.isNotEmpty()) return null
 
         // If there are no processing tasks, the latest failed task is the one we're interested in.
         return latestFailedTask.result
     }
 
-    fun rotationTaskStatus(taskID: String): String? {
-        val task = multiNodeTasks.findTask(rotationTaskType, taskID) ?: return null
+    fun rotationTaskStatus(taskID: Int): String? {
+        val task = multiNodeTasks.findTaskById(taskID) ?: return null
 
         return when {
             task.isDoneSuccessfully && task.result?.isNotEmpty() ?: false -> "Failed: ${task.result}"
@@ -327,7 +320,7 @@ abstract class AbstractFileBasedJWTSigner<K : JWK>(
 
         override fun accept(t: MultiNodeTasks.PerformingTask?) {
             try {
-                rotateKey(t?.identity?.substringBefore('@'))
+                rotateKey(t?.identity)
                 // Empty result is a workaround: when `t?.finished()` is called, `getResult` on that task throws an NPE
                 t?.finished(Dates.now(), "")
             } catch (e: Exception) {

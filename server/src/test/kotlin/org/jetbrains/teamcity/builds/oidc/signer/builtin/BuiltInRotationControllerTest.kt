@@ -125,10 +125,22 @@ class BuiltInRotationControllerTest : BaseTestCase() {
     }
 
     @Test
+    fun doGet_nonIntegerTaskID_returns404() {
+        loginAs(mockAuthorizedUser())
+        request.setParameter("taskID", "not-a-number")
+
+        controller.doGet(request, response)
+
+        Assertions.assertThat(response.status).isEqualTo(404)
+        assertHasError(responseXml(), "taskID")
+        verify(exactly = 0) { signer.rotationTaskStatus(any()) }
+    }
+
+    @Test
     fun doGet_unknownTask_returns404() {
         loginAs(mockAuthorizedUser())
-        request.setParameter("taskID", "task-1")
-        every { signer.rotationTaskStatus("task-1") } returns null
+        request.setParameter("taskID", "1")
+        every { signer.rotationTaskStatus(1) } returns null
 
         controller.doGet(request, response)
 
@@ -139,15 +151,15 @@ class BuiltInRotationControllerTest : BaseTestCase() {
     @Test
     fun doGet_knownTask_returnsTaskElementWithStatus() {
         loginAs(mockAuthorizedUser())
-        request.setParameter("taskID", "task-1")
-        every { signer.rotationTaskStatus("task-1") } returns "Pending"
+        request.setParameter("taskID", "1")
+        every { signer.rotationTaskStatus(1) } returns "Pending"
 
         controller.doGet(request, response)
 
         val xml = responseXml()
         val task = xml.getChild("response").getChild("task")
         Assertions.assertThat(task).isNotNull
-        Assertions.assertThat(task.getAttributeValue("id")).isEqualTo("task-1")
+        Assertions.assertThat(task.getAttributeValue("id")).isEqualTo("1")
         Assertions.assertThat(task.getAttributeValue("status")).isEqualTo("Pending")
         assertNoErrors(xml)
     }
