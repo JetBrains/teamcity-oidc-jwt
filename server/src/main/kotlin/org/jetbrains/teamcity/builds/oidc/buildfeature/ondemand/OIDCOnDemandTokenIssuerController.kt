@@ -33,7 +33,7 @@ class OIDCOnDemandTokenIssuerController @JvmOverloads constructor(
 
     @RequestMapping("",
         method = [RequestMethod.GET], produces = ["text/plain"])
-    fun issue(@RequestParam("aud", required = false) requestedAud: List<String> = emptyList(), request: HttpServletRequest): String {
+    fun issue(@RequestParam("aud", required = false) requestedAud: List<String>? = emptyList(), request: HttpServletRequest): String {
         val buildId = WebAuthUtil.getAuthenticatedBuildId(request) ?: throw ResponseStatusException(
             HttpStatus.UNAUTHORIZED,
             "No authenticated build was found. Access to build tokens is denied."
@@ -53,7 +53,7 @@ class OIDCOnDemandTokenIssuerController @JvmOverloads constructor(
         }
 
         val issuer = settings.getEffectiveIssuer()
-        val audience = requestedAud.map { it.trim() }
+        val audience = requestedAud?.map { it.trim() } ?: emptyList()
 
         val allowedAudiences = onDemandFeatures.flatMap { it.oidcOnDemandAudiences(issuer) }.toSet()
         audience.filter { it !in allowedAudiences }.takeIf { it.isNotEmpty() }?.let {
