@@ -157,7 +157,7 @@ class BuiltInRotationControllerTest : BaseTestCase() {
         controller.doGet(request, response)
 
         val xml = responseXml()
-        val task = xml.getChild("response").getChild("task")
+        val task = xml.getChild("task")
         Assertions.assertThat(task).isNotNull
         Assertions.assertThat(task.getAttributeValue("id")).isEqualTo("1")
         Assertions.assertThat(task.getAttributeValue("status")).isEqualTo("Pending")

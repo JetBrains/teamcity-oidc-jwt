@@ -73,10 +73,8 @@ class BuiltInRotationController(
             XmlResponseUtil.writeXmlResponse(xmlResponse, response)
             return null
         }
-        val responseElement = Element("response")
         val resultElement = Element("task")
-        xmlResponse.addContent(responseElement as Content)
-        responseElement.addContent(resultElement as Content)
+        xmlResponse.addContent(resultElement as Content)
         resultElement.setAttribute("id", taskID)
         resultElement.setAttribute("status", status)
         XmlResponseUtil.writeXmlResponse(xmlResponse, response)
