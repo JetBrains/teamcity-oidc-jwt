@@ -33,7 +33,7 @@ class OIDCOnDemandTokenIssuerController @JvmOverloads constructor(
 
     @RequestMapping("",
         method = [RequestMethod.GET], produces = ["text/plain"])
-    fun issue(@RequestParam("aud") requestedAud: List<String>, request: HttpServletRequest): String {
+    fun issue(@RequestParam("aud", required = false) requestedAud: List<String>? = emptyList(), request: HttpServletRequest): String {
         val buildId = WebAuthUtil.getAuthenticatedBuildId(request) ?: throw ResponseStatusException(
             HttpStatus.UNAUTHORIZED,
             "No authenticated build was found. Access to build tokens is denied."
@@ -44,7 +44,7 @@ class OIDCOnDemandTokenIssuerController @JvmOverloads constructor(
         val project = projectManager.findProjectById(build.projectId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Project with ID ${build.projectId} not found")
 
-        val onDemandFeatures = build.oidcOnDemandBuildFeatures()
+        val onDemandFeatures = build.oidcOnDemandBuildFeatures().sortedBy { it.id }
         if (onDemandFeatures.isEmpty()) {
             throw ResponseStatusException(
                 HttpStatus.FORBIDDEN,
@@ -53,9 +53,9 @@ class OIDCOnDemandTokenIssuerController @JvmOverloads constructor(
         }
 
         val issuer = settings.getEffectiveIssuer()
-        val audience = requestedAud.map { it.trim() }
+        val audience = requestedAud?.map { it.trim() } ?: emptyList()
 
-        val allowedAudiences = onDemandFeatures.flatMap { it.oidcOnDemandAudiences(issuer) }
+        val allowedAudiences = onDemandFeatures.flatMap { it.oidcOnDemandAudiences(issuer) }.toSet()
         audience.filter { it !in allowedAudiences }.takeIf { it.isNotEmpty() }?.let {
             throw ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
@@ -66,10 +66,17 @@ class OIDCOnDemandTokenIssuerController @JvmOverloads constructor(
             )
         }
 
+        // If no audience was provided, combine all on-demand audiences to a single token.
+        val resultingAudience = if (audience.isEmpty()) {
+            allowedAudiences
+        } else {
+            audience
+        }
+
         val generatedClaims: JWTClaimsGenerator.GeneratedClaims = try {
             // The request is tainted with credentials from the build user.
             securityContextEx.runAsSystem<JWTClaimsGenerator.GeneratedClaims> {
-                JWTClaimsGenerator.generate(issuer, audience, project, build,
+                JWTClaimsGenerator.generate(issuer, resultingAudience, project, build,
                     OIDCConstants.BuildFeatureOnDemand.TOKEN_LIFETIME_SECONDS, clock)
             }
         } catch (e: Exception) {
