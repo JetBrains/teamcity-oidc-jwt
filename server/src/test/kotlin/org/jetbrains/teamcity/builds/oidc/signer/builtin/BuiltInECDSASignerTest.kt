@@ -7,8 +7,11 @@ import com.nimbusds.jose.jwk.Curve
 import com.nimbusds.jose.jwk.ECKey
 import com.nimbusds.jose.jwk.JWKSet
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator
+import jetbrains.buildServer.serverSide.MultiNodeTasks
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.ServerPaths
+import jetbrains.buildServer.serverSide.ServerResponsibility
+import jetbrains.buildServer.serverSide.TeamCityNodes
 import jetbrains.buildServer.serverSide.auth.Permission
 import jetbrains.buildServer.serverSide.crypt.Encryption
 import jetbrains.buildServer.web.openapi.PluginDescriptor
@@ -24,6 +27,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
 import java.util.Comparator
+import java.util.Date
 
 class BuiltInECDSASignerTest : BaseTestCase() {
 
@@ -35,6 +39,9 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     private lateinit var settingsStore: BuiltInECDSASettingsStore
     private lateinit var jwkCache: JWKCache
     private lateinit var serverPaths: ServerPaths
+    private lateinit var serverResponsibility: ServerResponsibility
+    private lateinit var teamCityNodes: TeamCityNodes
+    private lateinit var multiNodeTasks: MultiNodeTasks
     private var currentSettings = BuiltInECDSASettings()
     private val settingsUpdateHandlers = mutableListOf<() -> Unit>()
     private var signer: BuiltInECDSASigner? = null
@@ -79,6 +86,16 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         serverPaths = mockk {
             every { pluginDataDirectory } returns tempDir.resolve("pluginData").toFile()
         }
+
+        serverResponsibility = mockk {
+            every { canManageBuilds() } returns true
+        }
+
+        teamCityNodes = mockk {
+            every { currentNode.id } returns "test-node-1"
+        }
+
+        multiNodeTasks = mockk(relaxed = true)
     }
 
     @AfterMethod
@@ -97,9 +114,34 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     }
 
     private fun createSigner(): BuiltInECDSASigner {
-        val s = BuiltInECDSASigner(controllerManager, serverPaths, encryption, pluginDescriptor, settingsStore, jwkCache)
+        val s = BuiltInECDSASigner(
+            controllerManager,
+            teamCityNodes,
+            serverResponsibility,
+            serverPaths,
+            encryption,
+            pluginDescriptor,
+            multiNodeTasks,
+            settingsStore,
+            jwkCache
+        )
         signer = s
         return s
+    }
+
+    private fun captureRotationConsumer(): MultiNodeTasks.TaskConsumer {
+        val slot = slot<MultiNodeTasks.TaskConsumer>()
+        verify { multiNodeTasks.subscribe(any(), capture(slot)) }
+        return slot.captured
+    }
+
+    private fun rotationTask(keyID: String): MultiNodeTasks.PerformingTask =
+        mockk(relaxed = true) { every { identity } returns keyID }
+
+    private fun driveRotationTask(consumer: MultiNodeTasks.TaskConsumer, keyID: String) {
+        // Honor the framework contract: accept() runs only if beforeAccept() is true.
+        val task = rotationTask(keyID)
+        if (consumer.beforeAccept(task)) consumer.accept(task)
     }
 
     private fun makeSimpleJWT(target: BuiltInECDSASigner): String {
@@ -311,6 +353,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     @Test
     fun getJWKS_returnsValidJWKSJSON() {
         val signer = createSigner()
+        makeSimpleJWT(signer)
         val jwks = JWKSet.parse(signer.getJWKS())
         Assertions.assertThat(jwks.keys).hasSize(1)
         Assertions.assertThat(jwks.keys[0].keyType.value).isEqualTo("EC")
@@ -318,13 +361,13 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     }
 
     @Test
-    fun getJWKS_generatesKeyIfMissing() {
+    fun getJWKS_doesNotGenerateKeyIfMissing() {
         val signer = createSigner()
         Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
 
         val jwks = signer.getJWKS()
-        Assertions.assertThat(jwks).isNotEmpty()
-        Assertions.assertThat(Files.exists(keyFilePath())).isTrue()
+        Assertions.assertThat(JWKSet.parse(jwks).keys).isEmpty()
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
     }
 
     @Test
@@ -543,7 +586,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
      */
 
     @Test
-    fun saveSettings_sameAlgorithm_doesNotRotate() {
+    fun saveSettings_sameAlgorithm_doesNotRequestRotation() {
         val signer = createSigner()
         makeSimpleJWT(signer)
         val cachedKeyBefore = signer.cachedKey
@@ -555,44 +598,33 @@ class BuiltInECDSASignerTest : BaseTestCase() {
         Assertions.assertThat(Files.exists(keyFilePath())).isTrue()
         Assertions.assertThat(signer.cachedKey).isSameAs(cachedKeyBefore)
         Assertions.assertThat(listKeyDirFiles()).hasSize(1) // only private.key
+        verify(exactly = 0) { multiNodeTasks.submit(any()) }
     }
 
     @Test
-    fun saveSettings_differentAlgorithm_deletesCurrentKeyFile() {
+    fun saveSettings_differentAlgorithm_requestsRotationAndKeepsKeyFile() {
         val signer = createSigner()
-        makeSimpleJWT(signer)
+        val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
         Assertions.assertThat(Files.exists(keyFilePath())).isTrue()
 
         signer.saveSettings(mutableMapOf("jwsAlgorithm" to "ES384"))
 
-        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+        // Rotation is deferred to a multi-node task; the key file is untouched here.
+        Assertions.assertThat(Files.exists(keyFilePath())).isTrue()
+        verify(exactly = 1) {
+            multiNodeTasks.submit(match { it.type == "oidc-jwt-rotate-key-ecdsa" && it.identity == kid })
+        }
     }
 
     @Test
-    fun saveSettings_differentAlgorithm_savesRotatedKeyFileNamedWithOldCurve() {
+    fun saveSettings_differentAlgorithm_doesNotCreateRotatedBackupSynchronously() {
         val signer = createSigner()
-        val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
+        makeSimpleJWT(signer)
 
         signer.saveSettings(mutableMapOf("jwsAlgorithm" to "ES512"))
 
         val rotatedFiles = listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
-        Assertions.assertThat(rotatedFiles).hasSize(1)
-
-        val name = rotatedFiles[0].fileName.toString()
-        Assertions.assertThat(name).startsWith("private.P-256.")
-        Assertions.assertThat(name).contains(kid)
-        Assertions.assertThat(name).matches("private\\.P-256\\..*\\.rotated-on-\\d+")
-    }
-
-    @Test
-    fun saveSettings_differentAlgorithm_clearsCache() {
-        val signer = createSigner()
-        makeSimpleJWT(signer)
-        Assertions.assertThat(signer.cachedKey).isNotNull()
-
-        signer.saveSettings(mutableMapOf("jwsAlgorithm" to "ES384"))
-
-        Assertions.assertThat(signer.cachedKey).isNull()
+        Assertions.assertThat(rotatedFiles).isEmpty()
     }
 
     @Test
@@ -606,11 +638,14 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     }
 
     @Test
-    fun saveSettings_differentAlgorithm_subsequentMakeJWTUsesNewCurveAndAlg() {
+    fun saveSettings_differentAlgorithm_afterRotationTaskRuns_makeJWTUsesNewCurveAndAlg() {
         val signer = createSigner()
         makeSimpleJWT(signer) // generates ES256/P-256 key
 
+        val kid = signer.cachedKey!!.keyID
         signer.saveSettings(mutableMapOf("jwsAlgorithm" to "ES384"))
+        // Drive the deferred rotation task: it backs up and deletes the current key.
+        driveRotationTask(captureRotationConsumer(), kid)
         val jws = parseJWT(makeSimpleJWT(signer))
 
         Assertions.assertThat(jws.header.algorithm.name).isEqualTo("ES384")
@@ -618,7 +653,7 @@ class BuiltInECDSASignerTest : BaseTestCase() {
     }
 
     @Test
-    fun saveSettings_noExistingKey_doesNotCreateRotatedFile() {
+    fun saveSettings_noExistingKey_doesNotRequestRotation() {
         val signer = createSigner()
         // Do not generate a key before calling saveSettings
 
@@ -626,15 +661,18 @@ class BuiltInECDSASignerTest : BaseTestCase() {
 
         val rotatedFiles = listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
         Assertions.assertThat(rotatedFiles).isEmpty()
+        verify(exactly = 0) { multiNodeTasks.submit(any()) }
     }
 
     @Test
-    fun saveSettings_rotateFromES384_backupNamedWithP384() {
+    fun saveSettings_rotateFromES384_afterRotationTaskRuns_backupNamedWithP384() {
         currentSettings = currentSettings.copy(jwsAlgorithm = "ES384")
         val signer = createSigner()
         makeSimpleJWT(signer) // generates ES384/P-384 key
 
+        val kid = signer.cachedKey!!.keyID
         signer.saveSettings(mutableMapOf("jwsAlgorithm" to "ES256"))
+        driveRotationTask(captureRotationConsumer(), kid)
 
         val rotatedFiles = listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
         Assertions.assertThat(rotatedFiles).hasSize(1)
@@ -811,21 +849,18 @@ class BuiltInECDSASignerTest : BaseTestCase() {
      */
 
     @Test
-    fun getCurrentKeyPublicJWK_generatesKeyIfMissing_returnsValidPublicJWK() {
+    fun getCurrentKeyPublicJWK_doesNotGenerateKeyIfMissing_returnsEmpty() {
         val signer = createSigner()
         Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
 
-        val jwk = ECKey.parse(signer.getCurrentKeyPublicJWK())
-
-        Assertions.assertThat(Files.exists(keyFilePath())).isTrue()
-        Assertions.assertThat(jwk.keyType.value).isEqualTo("EC")
-        Assertions.assertThat(jwk.curve).isEqualTo(Curve.P_256)
-        Assertions.assertThat(jwk.keyID).isNotEmpty()
+        Assertions.assertThat(signer.getCurrentKeyPublicJWK()).isEmpty()
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
     }
 
     @Test
     fun getCurrentKeyPublicJWK_returnsOnlyPublicComponents() {
         val signer = createSigner()
+        makeSimpleJWT(signer)
         val json = ECKey.parse(signer.getCurrentKeyPublicJWK()).toJSONObject()
 
         Assertions.assertThat(json["d"]).isNull()
@@ -866,5 +901,561 @@ class BuiltInECDSASignerTest : BaseTestCase() {
             JWTSignerException::class.java
         )
         Assertions.assertThat(ex.message).contains("Failed to load or generate signing key")
+    }
+
+    /*
+     * Secondary node / build-management capability
+     */
+
+    @Test
+    fun makeJWT_withoutBuildManagementCapability_throwsAndDoesNotGenerate() {
+        every { serverResponsibility.canManageBuilds() } returns false
+        val signer = createSigner()
+
+        val ex = Assertions.catchThrowableOfType(
+            { makeSimpleJWT(signer) },
+            JWTSignerException::class.java
+        )
+        // getKey wraps the capability error, so the specific message lives in the cause chain.
+        Assertions.assertThat(ex).hasStackTraceContaining("Cannot generate signing key on the current node")
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+        verify(exactly = 0) { jwkCache.trackKey(any(), any(), any()) }
+    }
+
+    @Test
+    fun makeJWT_nullKey_throwsJWTSignerException() {
+        val signer = spyk(createSigner())
+        every { signer["getKey"](any<Boolean>()) } returns null
+
+        val ex = Assertions.catchThrowableOfType(
+            { makeSimpleJWT(signer) },
+            JWTSignerException::class.java
+        )
+        Assertions.assertThat(ex.message).contains("Cannot load or generate key")
+    }
+
+    @Test
+    fun getJWKS_withoutBuildManagementCapability_returnsEmptyAndDoesNotGenerate() {
+        every { serverResponsibility.canManageBuilds() } returns false
+        val signer = createSigner()
+
+        val jwks = signer.getJWKS()
+        Assertions.assertThat(JWKSet.parse(jwks).keys).isEmpty()
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+    }
+
+    @Test
+    fun fillSettingsModel_noKey_showsWillBeGeneratedPlaceholder() {
+        val signer = createSigner()
+        val model = mutableMapOf<String, Any>()
+        signer.fillSettingsModel(model)
+
+        Assertions.assertThat(model["keyFingerprint"]).isEqualTo("<will be generated on first use>")
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+    }
+
+    @Test
+    fun fillSettingsModel_withoutBuildManagementCapability_doesNotThrow() {
+        every { serverResponsibility.canManageBuilds() } returns false
+        val signer = createSigner()
+        val model = mutableMapOf<String, Any>()
+        signer.fillSettingsModel(model)
+
+        Assertions.assertThat(model["keyFingerprint"]).isEqualTo("<will be generated on first use>")
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+    }
+
+    /*
+     * Multi-node rotation task
+     */
+
+    @Test
+    fun init_subscribesToRotationTask() {
+        createSigner()
+        verify(exactly = 1) {
+            multiNodeTasks.subscribe(eq("oidc-jwt-rotate-key-ecdsa"), any())
+        }
+    }
+
+    @Test
+    fun destroy_unsubscribesFromRotationTask() {
+        val signer = createSigner()
+        signer.destroy()
+        this.signer = null // avoid a second destroy() in tearDown
+        verify(exactly = 1) { multiNodeTasks.unsubscribe(eq("oidc-jwt-rotate-key-ecdsa")) }
+    }
+
+    @Test
+    fun rotationTask_withBuildManagementCapability_rotatesKey() {
+        val signer = createSigner()
+        makeSimpleJWT(signer) // generate current key (capability = true)
+
+        driveRotationTask(captureRotationConsumer(), signer.cachedKey!!.keyID)
+
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+        Assertions.assertThat(
+            listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
+        ).hasSize(1)
+    }
+
+    @Test
+    fun rotationTask_savesPreviousKeyToBackupAndRemovesKeyFile() {
+        val signer = createSigner()
+        makeSimpleJWT(signer) // generate current key (capability = true)
+        val previousKid = signer.cachedKey!!.keyID
+
+        driveRotationTask(captureRotationConsumer(), previousKid)
+
+        // The live key file is removed.
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+
+        // Exactly one backup, named after the previous key, holding the previous key itself.
+        val rotated = listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
+        Assertions.assertThat(rotated).hasSize(1)
+        Assertions.assertThat(rotated[0].fileName.toString()).contains(previousKid)
+        val backedUp = ECKey.parse(encryption.decrypt(Files.readString(rotated[0])))
+        Assertions.assertThat(backedUp.keyID).isEqualTo(previousKid)
+        Assertions.assertThat(backedUp.isPrivate).isTrue()
+    }
+
+    @Test
+    fun rotationTask_noCurrentKey_exitsEarlyWithoutRotating() {
+        val signer = createSigner()
+        // No key on disk: there is nothing to rotate.
+        val consumer = captureRotationConsumer()
+        val task = rotationTask("nonexistent-kid")
+
+        consumer.accept(task)
+
+        // Early return: no backup written, no key file created, no save attempted.
+        Assertions.assertThat(Files.exists(keyFilePath())).isFalse()
+        Assertions.assertThat(
+            listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
+        ).isEmpty()
+        verify(exactly = 0) { encryption.encrypt(any()) }
+        // The task still completes successfully (no failure details).
+        verify(exactly = 0) { task.finished() }
+        verify(exactly = 1) { task.finished(any(), any()) }
+    }
+
+    @Test
+    fun rotationTask_withoutBuildManagementCapability_doesNotRotate() {
+        val signer = createSigner()
+        makeSimpleJWT(signer) // generate key while capability = true
+        val kid = signer.cachedKey!!.keyID
+
+        every { serverResponsibility.canManageBuilds() } returns false
+
+        driveRotationTask(captureRotationConsumer(), kid)
+
+        Assertions.assertThat(Files.exists(keyFilePath())).isTrue()
+        Assertions.assertThat(
+            listKeyDirFiles().filter { it.fileName.toString().contains("rotated-on") }
+        ).isEmpty()
+    }
+
+    @Test
+    fun rotationTask_successfulRotation_finishesTaskWithoutFailureDetails() {
+        val signer = createSigner()
+        makeSimpleJWT(signer) // generate current key (capability = true)
+        val consumer = captureRotationConsumer()
+        val task = rotationTask(signer.cachedKey!!.keyID)
+
+        consumer.accept(task)
+
+        verify(exactly = 0) { task.finished() }
+        verify(exactly = 1) { task.finished(any(), any()) }
+    }
+
+    @Test
+    fun rotationTask_rotationFailsWithMessage_finishesTaskWithFailureDetails() {
+        val signer = createSigner()
+        makeSimpleJWT(signer) // generate current key while encryption works
+        val consumer = captureRotationConsumer()
+        // Capture the kid before breaking encryption so the task passes the key-ID guard.
+        val task = rotationTask(signer.cachedKey!!.keyID)
+        // Break the backup save performed during rotation so accept() hits the failure branch.
+        every { encryption.encrypt(any()) } throws RuntimeException("disk full")
+        val details = slot<String>()
+
+        consumer.accept(task)
+
+        verify(exactly = 0) { task.finished() }
+        verify(exactly = 1) { task.finished(any(), capture(details)) }
+        Assertions.assertThat(details.captured)
+            .isEqualTo("Failed to rotate the key due to java.lang.RuntimeException: disk full")
+    }
+
+    @Test
+    fun rotationTask_rotationFailsWithoutMessage_finishesTaskWithFallbackDetails() {
+        val signer = createSigner()
+        makeSimpleJWT(signer) // generate current key while encryption works
+        val consumer = captureRotationConsumer()
+        // Capture the kid before breaking encryption so the task passes the key-ID guard.
+        val task = rotationTask(signer.cachedKey!!.keyID)
+        // Exception without a message: the details fall back to "${e} (no message)".
+        every { encryption.encrypt(any()) } throws RuntimeException()
+        val details = slot<String>()
+
+        consumer.accept(task)
+
+        verify(exactly = 0) { task.finished() }
+        verify(exactly = 1) { task.finished(any(), capture(details)) }
+        Assertions.assertThat(details.captured)
+            .isEqualTo("Failed to rotate the key due to java.lang.RuntimeException: java.lang.RuntimeException (no message)")
+    }
+
+    private fun taskWithIdentity(identity: String): MultiNodeTasks.SubmittedTask =
+        mockk { every { this@mockk.identity } returns identity }
+
+    private fun submittedTask(
+        isDoneSuccessfully: Boolean = false,
+        result: String? = null,
+        isDone: Boolean = false,
+        executorNodeId: String? = null,
+        id: Int = 0,
+    ): MultiNodeTasks.SubmittedTask = mockk {
+        every { this@mockk.isDoneSuccessfully } returns isDoneSuccessfully
+        every { this@mockk.result } returns result
+        every { this@mockk.isDone } returns isDone
+        every { this@mockk.executorNodeId } returns executorNodeId
+        every { this@mockk.id } returns id
+    }
+
+    private fun finishedTask(
+        identity: String,
+        result: String? = null,
+        lastActivityTime: Long = 0L,
+    ): MultiNodeTasks.SubmittedTask = mockk {
+        every { this@mockk.identity } returns identity
+        every { this@mockk.result } returns result
+        every { this@mockk.lastActivityTime } returns Date(lastActivityTime)
+    }
+
+    /*
+     * isKeyRotationInProgress
+     */
+
+    @Test
+    fun isKeyRotationInProgress_pendingTaskWithMatchingIdentity_returnsTrue() {
+        val signer = createSigner()
+        // The task identity is the key id, matched by exact equality.
+        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity("kid-1"))
+
+        Assertions.assertThat(signer.isKeyRotationInProgress("kid-1")).isTrue()
+    }
+
+    @Test
+    fun isKeyRotationInProgress_noTasks_returnsFalse() {
+        val signer = createSigner()
+        // relaxed multiNodeTasks returns empty lists for all find* calls
+        Assertions.assertThat(signer.isKeyRotationInProgress("kid-1")).isFalse()
+    }
+
+    @Test
+    fun isKeyRotationInProgress_inProgressTaskWithMatchingIdentity_returnsTrue() {
+        val signer = createSigner()
+        every { multiNodeTasks.findInProgressTasks(any()) } returns listOf(taskWithIdentity("kid-1"))
+
+        Assertions.assertThat(signer.isKeyRotationInProgress("kid-1")).isTrue()
+    }
+
+    @Test
+    fun isKeyRotationInProgress_recentlyFinishedSucceededTaskWithMatchingIdentity_returnsTrueUsingThreshold() {
+        val signer = createSigner()
+        // Only finished tasks with a null result (succeeded) count, covering the cache-refresh gap.
+        every { multiNodeTasks.findFinishedTasks(any(), 10000L) } returns
+            listOf(finishedTask("kid-1", result = null))
+
+        Assertions.assertThat(signer.isKeyRotationInProgress("kid-1")).isTrue()
+        verify { multiNodeTasks.findFinishedTasks(any(), 10000L) }
+    }
+
+    @Test
+    fun isKeyRotationInProgress_recentlyFinishedFailedTaskWithMatchingIdentity_returnsFalse() {
+        val signer = createSigner()
+        // A finished task with a non-null result is a failure, not an in-progress rotation.
+        every { multiNodeTasks.findFinishedTasks(any(), 10000L) } returns
+            listOf(finishedTask("kid-1", result = "boom"))
+
+        Assertions.assertThat(signer.isKeyRotationInProgress("kid-1")).isFalse()
+    }
+
+    /*
+     * requestKeyRotation
+     */
+
+    @Test
+    fun requestKeyRotation_reloadsFreshKeyIdFromDisk() {
+        val signer = createSigner()
+        val kid1 = parseJWT(makeSimpleJWT(signer)).header.keyID // generate & cache key
+
+        // Replace the on-disk key without invalidating the in-memory cache
+        val newKey = generateTestKey()
+        Files.writeString(keyFilePath(), newKey.toJSONString())
+
+        signer.requestKeyRotation()
+
+        val submitted = slot<MultiNodeTasks.Task>()
+        verify(exactly = 1) { multiNodeTasks.submit(capture(submitted)) }
+        Assertions.assertThat(submitted.captured.identity).isEqualTo(newKey.keyID)
+        Assertions.assertThat(submitted.captured.identity).isNotEqualTo(kid1)
+    }
+
+    @Test
+    fun requestKeyRotation_noKey_throwsAndDoesNotSubmit() {
+        val signer = createSigner()
+        // No key on disk
+
+        Assertions.catchThrowableOfType(
+            { signer.requestKeyRotation() },
+            JWTSignerException::class.java
+        )
+
+        verify(exactly = 0) { multiNodeTasks.submit(any()) }
+    }
+
+    @Test
+    fun requestKeyRotation_rotationAlreadyInProgress_throwsAndDoesNotSubmit() {
+        val signer = createSigner()
+        val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
+        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity(kid))
+
+        Assertions.catchThrowableOfType(
+            { signer.requestKeyRotation() },
+            JWTSignerException::class.java
+        )
+
+        verify(exactly = 0) { multiNodeTasks.submit(any()) }
+    }
+
+    @Test
+    fun requestKeyRotation_keyPresent_submitsTaskWithKeyIdentity() {
+        val signer = createSigner()
+        val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
+
+        signer.requestKeyRotation()
+
+        verify(exactly = 1) {
+            multiNodeTasks.submit(match { it.type == "oidc-jwt-rotate-key-ecdsa" && it.identity == kid })
+        }
+    }
+
+    @Test
+    fun requestKeyRotation_keyPresent_returnsSubmittedTaskID() {
+        val signer = createSigner()
+        val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
+        every { multiNodeTasks.submit(any()) } returns submittedTask(id = 42)
+
+        val taskID = signer.requestKeyRotation()
+
+        verify(exactly = 1) { multiNodeTasks.submit(match { it.identity == kid }) }
+        Assertions.assertThat(taskID).isEqualTo("42")
+    }
+
+    /*
+     * rotationTaskStatus
+     */
+
+    @Test
+    fun rotationTaskStatus_taskNotFound_returnsNull() {
+        val signer = createSigner()
+        every { multiNodeTasks.findTaskById(1) } returns null
+
+        Assertions.assertThat(signer.rotationTaskStatus(1)).isNull()
+    }
+
+    @Test
+    fun rotationTaskStatus_doneSuccessfullyWithResult_returnsFailedWithReason() {
+        val signer = createSigner()
+        every { multiNodeTasks.findTaskById(1) } returns
+            submittedTask(isDoneSuccessfully = true, result = "boom")
+
+        Assertions.assertThat(signer.rotationTaskStatus(1)).isEqualTo("Failed: boom")
+    }
+
+    @Test
+    fun rotationTaskStatus_doneSuccessfully_returnsSuccess() {
+        val signer = createSigner()
+        every { multiNodeTasks.findTaskById(1) } returns
+            submittedTask(isDoneSuccessfully = true, result = null)
+
+        Assertions.assertThat(signer.rotationTaskStatus(1)).isEqualTo("Success")
+    }
+
+    @Test
+    fun rotationTaskStatus_doneButNotSuccessfully_returnsCancelled() {
+        val signer = createSigner()
+        every { multiNodeTasks.findTaskById(1) } returns
+            submittedTask(isDone = true)
+
+        Assertions.assertThat(signer.rotationTaskStatus(1)).isEqualTo("Cancelled")
+    }
+
+    @Test
+    fun rotationTaskStatus_assignedToNodeNotDone_returnsInProgress() {
+        val signer = createSigner()
+        every { multiNodeTasks.findTaskById(1) } returns
+            submittedTask(executorNodeId = "node-7")
+
+        Assertions.assertThat(signer.rotationTaskStatus(1)).isEqualTo("In progress on node-7")
+    }
+
+    @Test
+    fun rotationTaskStatus_pendingTask_returnsPending() {
+        val signer = createSigner()
+        every { multiNodeTasks.findTaskById(1) } returns submittedTask()
+
+        Assertions.assertThat(signer.rotationTaskStatus(1)).isEqualTo("Pending")
+    }
+
+    /*
+     * fillSettingsModel rotation-in-progress suffix
+     */
+
+    @Test
+    fun fillSettingsModel_pendingRotationTask_appendsRotationSuffix() {
+        val signer = createSigner()
+        val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
+        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity(kid))
+
+        val model = mutableMapOf<String, Any>()
+        signer.fillSettingsModel(model)
+
+        Assertions.assertThat(model["keyFingerprint"]).isEqualTo("$kid (rotation in progress)")
+    }
+
+    @Test
+    fun fillSettingsModel_inProgressRotationTask_appendsRotationSuffix() {
+        val signer = createSigner()
+        val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
+        every { multiNodeTasks.findInProgressTasks(any()) } returns listOf(taskWithIdentity(kid))
+
+        val model = mutableMapOf<String, Any>()
+        signer.fillSettingsModel(model)
+
+        Assertions.assertThat(model["keyFingerprint"]).isEqualTo("$kid (rotation in progress)")
+    }
+
+    @Test
+    fun fillSettingsModel_recentlyFinishedRotationTask_appendsRotationSuffix() {
+        val signer = createSigner()
+        val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
+        every { multiNodeTasks.findFinishedTasks(any(), 10000L) } returns
+            listOf(finishedTask(kid, result = null))
+
+        val model = mutableMapOf<String, Any>()
+        signer.fillSettingsModel(model)
+
+        Assertions.assertThat(model["keyFingerprint"]).isEqualTo("$kid (rotation in progress)")
+    }
+
+    @Test
+    fun fillSettingsModel_noKey_doesNotAppendRotationSuffix() {
+        val signer = createSigner()
+        // No key, yet a rotation task exists for some identity: the placeholder must stay.
+        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity("whatever"))
+
+        val model = mutableMapOf<String, Any>()
+        signer.fillSettingsModel(model)
+
+        Assertions.assertThat(model["keyFingerprint"]).isEqualTo("<will be generated on first use>")
+    }
+
+    /*
+     * getLatestKeyRotationError
+     */
+
+    @Test
+    fun getLatestKeyRotationError_noFinishedTasks_returnsNull() {
+        val signer = createSigner()
+        // relaxed multiNodeTasks returns empty lists for all find* calls
+        Assertions.assertThat(signer.getLatestKeyRotationError("kid-1")).isNull()
+    }
+
+    @Test
+    fun getLatestKeyRotationError_noFinishedTasksForKeyId_returnsNull() {
+        val signer = createSigner()
+        // A failed finished task exists, but for a different key.
+        every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
+            listOf(finishedTask("other-kid", result = "boom", lastActivityTime = 100L))
+
+        Assertions.assertThat(signer.getLatestKeyRotationError("kid-1")).isNull()
+    }
+
+    @Test
+    fun getLatestKeyRotationError_finishedTasksForKeyIdButEmptyResult_returnsNull() {
+        val signer = createSigner()
+        // Matching identity, but a null result means the task succeeded -- not an error.
+        every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
+            listOf(finishedTask("kid-1", result = null, lastActivityTime = 100L))
+
+        Assertions.assertThat(signer.getLatestKeyRotationError("kid-1")).isNull()
+    }
+
+    @Test
+    fun getLatestKeyRotationError_finishedErrorButProcessingTaskForSameKey_returnsNull() {
+        val signer = createSigner()
+        every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
+            listOf(finishedTask("kid-1", result = "boom", lastActivityTime = 100L))
+        // A pending task for the same key means a retry may still succeed: ignore the error.
+        every { multiNodeTasks.findPendingTasks(any()) } returns listOf(taskWithIdentity("kid-1"))
+
+        Assertions.assertThat(signer.getLatestKeyRotationError("kid-1")).isNull()
+    }
+
+    @Test
+    fun getLatestKeyRotationError_multipleFinishedTasks_returnsLatestResult() {
+        val signer = createSigner()
+        // No processing tasks; the most recent failed task (by lastActivityTime) wins.
+        every { multiNodeTasks.findFinishedTasks(any(), any()) } returns listOf(
+            finishedTask("kid-1", result = "older error", lastActivityTime = 100L),
+            finishedTask("kid-1", result = "newest error", lastActivityTime = 300L),
+            finishedTask("kid-1", result = "middle error", lastActivityTime = 200L),
+        )
+
+        Assertions.assertThat(signer.getLatestKeyRotationError("kid-1")).isEqualTo("newest error")
+    }
+
+    /*
+     * fillSettingsModel last error
+     */
+
+    @Test
+    fun fillSettingsModel_lastErrorForExistingKey_addsKeyRotationLastError() {
+        val signer = createSigner()
+        val kid = parseJWT(makeSimpleJWT(signer)).header.keyID
+        every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
+            listOf(finishedTask(kid, result = "rotation failed", lastActivityTime = 100L))
+
+        val model = mutableMapOf<String, Any>()
+        signer.fillSettingsModel(model)
+
+        Assertions.assertThat(model["keyRotationLastError"]).isEqualTo("rotation failed")
+    }
+
+    @Test
+    fun fillSettingsModel_noLastErrorForExistingKey_doesNotAddKeyRotationLastError() {
+        val signer = createSigner()
+        makeSimpleJWT(signer)
+        // No finished failed tasks: relaxed multiNodeTasks returns empty lists.
+
+        val model = mutableMapOf<String, Any>()
+        signer.fillSettingsModel(model)
+
+        Assertions.assertThat(model).doesNotContainKey("keyRotationLastError")
+    }
+
+    @Test
+    fun fillSettingsModel_noCurrentKey_doesNotAddKeyRotationLastError() {
+        val signer = createSigner()
+        // No key on disk; a finished failed task exists but must be ignored without a current key.
+        every { multiNodeTasks.findFinishedTasks(any(), any()) } returns
+            listOf(finishedTask("kid-1", result = "rotation failed", lastActivityTime = 100L))
+
+        val model = mutableMapOf<String, Any>()
+        signer.fillSettingsModel(model)
+
+        Assertions.assertThat(model).doesNotContainKey("keyRotationLastError")
     }
 }

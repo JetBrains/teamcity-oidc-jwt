@@ -1,23 +1,23 @@
 package org.jetbrains.teamcity.builds.oidc.signer.builtin
 
+import jetbrains.buildServer.controllers.MockRequest
+import jetbrains.buildServer.controllers.MockResponse
 import jetbrains.buildServer.serverSide.auth.Permission
 import jetbrains.buildServer.users.SUser
 import jetbrains.buildServer.web.openapi.WebControllerManager
 import jetbrains.buildServer.BaseTestCase
 import org.jdom.Element
 import org.assertj.core.api.Assertions
+import org.testng.annotations.AfterMethod
 import org.testng.annotations.BeforeMethod
 import org.testng.annotations.Test
 import io.mockk.*
-import javax.servlet.http.HttpServletRequest
-import javax.servlet.http.HttpServletResponse
 
 class BuiltInRotationControllerTest : BaseTestCase() {
     private lateinit var controllerManager: WebControllerManager
     private lateinit var signer: AbstractFileBasedJWTSigner<*>
-    private lateinit var request: HttpServletRequest
-    private lateinit var response: HttpServletResponse
-    private lateinit var xmlResponse: Element
+    private lateinit var request: MockRequest
+    private lateinit var response: MockResponse
     private lateinit var controller: BuiltInRotationController
 
     @BeforeMethod
@@ -27,11 +27,16 @@ class BuiltInRotationControllerTest : BaseTestCase() {
         signer = mockk {
             every { id } returns "builtin-rsa"
         }
-        request = mockk()
-        response = mockk()
-        xmlResponse = Element("response")
+        request = MockRequest()
+        response = MockResponse()
 
         controller = BuiltInRotationController(controllerManager, signer)
+    }
+
+    @AfterMethod
+    override fun tearDown() {
+        unmockkAll()
+        super.tearDown()
     }
 
     private fun mockAuthorizedUser(): SUser = mockk {
@@ -44,9 +49,14 @@ class BuiltInRotationControllerTest : BaseTestCase() {
         every { username } returns "reader"
     }
 
-    private fun stubSessionUser(user: SUser?) {
-        every { request.getAttribute("USER_KEY") } returns user
+    private fun loginAs(user: SUser?) {
+        if (user != null) {
+            request.setAttribute("USER_KEY", user)
+        }
     }
+
+    /** Parses the XML the controller serialized into the servlet response. */
+    private fun responseXml(): Element = response.getReturnedContentAsXml()
 
     private fun getErrors(element: Element): Map<String, String> {
         val errorsElement = element.getChild("errors") ?: return emptyMap()
@@ -85,46 +95,117 @@ class BuiltInRotationControllerTest : BaseTestCase() {
     }
 
     @Test
-    fun doGet_returnsNull() {
-        val result: Any? = controller.doGet(request, response)
-        Assertions.assertThat(result).isNull()
+    fun doGet_unauthorizedUser_returns403() {
+        loginAs(mockUnauthorizedUser())
+
+        controller.doGet(request, response)
+
+        Assertions.assertThat(response.status).isEqualTo(403)
+        assertHasError(responseXml(), "permission")
     }
 
     @Test
-    fun doPost_nullUser_doesNotRotateAndReturnsError() {
-        stubSessionUser(null)
+    fun doGet_nullUser_returns403() {
+        loginAs(null)
+
+        controller.doGet(request, response)
+
+        Assertions.assertThat(response.status).isEqualTo(403)
+        assertHasError(responseXml(), "permission")
+    }
+
+    @Test
+    fun doGet_missingTaskID_returns400() {
+        loginAs(mockAuthorizedUser())
+
+        controller.doGet(request, response)
+
+        Assertions.assertThat(response.status).isEqualTo(400)
+        assertHasError(responseXml(), "taskID")
+    }
+
+    @Test
+    fun doGet_nonIntegerTaskID_returns404() {
+        loginAs(mockAuthorizedUser())
+        request.setParameter("taskID", "not-a-number")
+
+        controller.doGet(request, response)
+
+        Assertions.assertThat(response.status).isEqualTo(404)
+        assertHasError(responseXml(), "taskID")
+        verify(exactly = 0) { signer.rotationTaskStatus(any()) }
+    }
+
+    @Test
+    fun doGet_unknownTask_returns404() {
+        loginAs(mockAuthorizedUser())
+        request.setParameter("taskID", "1")
+        every { signer.rotationTaskStatus(1) } returns null
+
+        controller.doGet(request, response)
+
+        Assertions.assertThat(response.status).isEqualTo(404)
+        assertHasError(responseXml(), "taskID")
+    }
+
+    @Test
+    fun doGet_knownTask_returnsTaskElementWithStatus() {
+        loginAs(mockAuthorizedUser())
+        request.setParameter("taskID", "1")
+        every { signer.rotationTaskStatus(1) } returns "Pending"
+
+        controller.doGet(request, response)
+
+        val xml = responseXml()
+        val task = xml.getChild("task")
+        Assertions.assertThat(task).isNotNull
+        Assertions.assertThat(task.getAttributeValue("id")).isEqualTo("1")
+        Assertions.assertThat(task.getAttributeValue("status")).isEqualTo("Pending")
+        assertNoErrors(xml)
+    }
+
+    @Test
+    fun doPost_nullUser_doesNotRequestRotationAndReturnsError() {
+        loginAs(null)
+        val xmlResponse = Element("response")
 
         controller.doPost(request, response, xmlResponse)
 
-        verify(exactly = 0) { signer.rotateKey() }
+        verify(exactly = 0) { signer.requestKeyRotation() }
         assertHasError(xmlResponse, "rotation", "permission")
     }
 
     @Test
-    fun doPost_userWithoutPermission_doesNotRotateAndReturnsError() {
-        stubSessionUser(mockUnauthorizedUser())
+    fun doPost_userWithoutPermission_doesNotRequestRotationAndReturnsError() {
+        loginAs(mockUnauthorizedUser())
+        val xmlResponse = Element("response")
 
         controller.doPost(request, response, xmlResponse)
 
-        verify(exactly = 0) { signer.rotateKey() }
+        verify(exactly = 0) { signer.requestKeyRotation() }
         assertHasError(xmlResponse, "rotation", "permission")
     }
 
     @Test
-    fun doPost_authorizedUser_rotatesKeyAndReturnsNoErrors() {
-        stubSessionUser(mockAuthorizedUser())
-        every { signer.rotateKey() } just Runs
+    fun doPost_authorizedUser_returnsTaskElement() {
+        loginAs(mockAuthorizedUser())
+        val xmlResponse = Element("response")
+        every { signer.requestKeyRotation() } returns "task-42"
 
         controller.doPost(request, response, xmlResponse)
 
-        verify(exactly = 1) { signer.rotateKey() }
+        verify(exactly = 1) { signer.requestKeyRotation() }
         assertNoErrors(xmlResponse)
+        val task = xmlResponse.getChild("task")
+        Assertions.assertThat(task).isNotNull
+        Assertions.assertThat(task.getAttributeValue("id")).isEqualTo("task-42")
     }
 
     @Test
-    fun doPost_rotateThrows_returnsError() {
-        stubSessionUser(mockAuthorizedUser())
-        every { signer.rotateKey() } throws RuntimeException("disk full")
+    fun doPost_requestRotationThrows_returnsError() {
+        loginAs(mockAuthorizedUser())
+        val xmlResponse = Element("response")
+        every { signer.requestKeyRotation() } throws RuntimeException("disk full")
 
         controller.doPost(request, response, xmlResponse)
 
@@ -133,13 +214,14 @@ class BuiltInRotationControllerTest : BaseTestCase() {
     }
 
     @Test
-    fun doPost_rotateThrowsWithoutMessage_returnsGenericError() {
-        stubSessionUser(mockAuthorizedUser())
-        every { signer.rotateKey() } throws RuntimeException()
+    fun doPost_requestRotationThrowsWithoutMessage_returnsGenericError() {
+        loginAs(mockAuthorizedUser())
+        val xmlResponse = Element("response")
+        every { signer.requestKeyRotation() } throws RuntimeException()
 
         controller.doPost(request, response, xmlResponse)
 
-        assertHasError(xmlResponse, "rotation", "Rotation failed")
+        assertHasError(xmlResponse, "rotation", "Rotation scheduling failed")
         clearFailure()
     }
 }

@@ -7,6 +7,10 @@ object OIDCConstants {
     const val PLUGIN_ID = "oidc-jwt"
     const val OIDC_ROOT_URL = "/app/$PLUGIN_ID"
 
+    object AbstractSigner {
+        const val KEY_ROTATION_TASK_FINISH_THRESHOLD_MS = 10000L
+    }
+
     object BuiltInRSASigner {
         // A compromise between a faster 2048 (which NIST and others want to be gone by 2030) and a much slower 4096
         const val DEFAULT_RSA_KEY_BITS = 3072
@@ -30,6 +34,8 @@ object OIDCConstants {
 
         const val SETTINGS_RSA_KEY_BITS_ATTR = "rsaKeyBits"
         const val SETTINGS_JWS_ALGORITHM_ATTR = "jwsAlgorithm"
+
+        const val ROTATE_TASK_TYPE = "oidc-jwt-rotate-key-rsa"
     }
 
     object BuiltInECDSASigner {
@@ -50,6 +56,8 @@ object OIDCConstants {
         const val SETTINGS_PERSIST_DESCRIPTION = "Save OIDC plugin built-in ECDSA signer settings"
 
         const val SETTINGS_JWS_ALGORITHM_ATTR = "jwsAlgorithm"
+
+        const val ROTATE_TASK_TYPE = "oidc-jwt-rotate-key-ecdsa"
     }
 
     object BuiltInRotationController {

@@ -8,6 +8,9 @@
       Rotate key now
     </button>
     <span class="error" id="error_rotateBuiltin${param.signerKind}Key"></span>
+    <c:if test="${not empty signer.settings.keyRotationLastError}">
+    <span class="error" id="error_rotateBuiltin${param.signerKind}KeyLastError">Error rotating key: <code><c:out value="${signer.settings.keyRotationLastError}" /></code></span>
+    </c:if>
     <c:choose>
       <c:when test="${param.active != 'true'}">
         <span class="smallNote">Key rotation is available only when this signer is the active one. Save your changes first.</span>

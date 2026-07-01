@@ -14,12 +14,16 @@ import com.nimbusds.jose.JWSAlgorithm
 import com.nimbusds.jose.JWSSigner
 import com.nimbusds.jose.crypto.RSASSASigner
 import com.nimbusds.jose.jwk.RSAKey
+import jetbrains.buildServer.serverSide.MultiNodeTasks
 import jetbrains.buildServer.serverSide.ServerPaths
+import jetbrains.buildServer.serverSide.ServerResponsibility
+import jetbrains.buildServer.serverSide.TeamCityNodes
 import jetbrains.buildServer.serverSide.crypt.Encryption
 import jetbrains.buildServer.util.Cached
 import jetbrains.buildServer.web.openapi.PluginDescriptor
 import jetbrains.buildServer.web.openapi.WebControllerManager
 import org.jetbrains.teamcity.builds.oidc.api.JWKCache
+import org.jetbrains.teamcity.builds.oidc.api.JWTSignerException
 import java.security.KeyPairGenerator
 import java.security.interfaces.RSAPrivateKey
 import java.security.interfaces.RSAPublicKey
@@ -30,21 +34,28 @@ import kotlin.concurrent.write
  */
 class BuiltInRSASigner(
     controllerManager: WebControllerManager,
+    teamCityNodes: TeamCityNodes,
+    serverResponsibility: ServerResponsibility,
     serverPaths: ServerPaths,
     encryption: Encryption,
     pluginDescriptor: PluginDescriptor,
+    multiNodeTasks: MultiNodeTasks,
     private val settingsStore: BuiltInRSASettingsStore,
     jwkCache: JWKCache,
     ) : AbstractFileBasedJWTSigner<RSAKey>(
     controllerManager,
+    teamCityNodes,
+    serverResponsibility,
     serverPaths,
     encryption,
     pluginDescriptor,
+    multiNodeTasks,
     jwkCache,
     keyRoot = KEY_ROOT,
     keySubdir = KEY_SUBDIR,
     keyFileName = PRIVATE_KEY_NAME,
     settingsJsp = SETTINGS_JSP,
+    rotationTaskType = OIDCConstants.BuiltInRSASigner.ROTATE_TASK_TYPE,
 ) {
     override fun getId(): String = OIDCConstants.BuiltInRSASigner.ID
     override fun getDisplayName(): String = OIDCConstants.BuiltInRSASigner.DISPLAY_NAME
@@ -131,10 +142,12 @@ class BuiltInRSASigner(
         if (!bitsChanged && !algorithmChanged) return emptyMap()
 
         val newSettings = BuiltInRSASettings(jwsAlgorithm = jwsAlgorithm, rsaKeyBits = rsaKeyBits)
-        keyLock.write {
-            settingsStore.save(newSettings)
-            if (bitsChanged) {
-                rotateKey()
+        settingsStore.save(newSettings)
+        if (bitsChanged) {
+            try {
+                requestKeyRotation()
+            } catch (e: JWTSignerException) {
+                // Ignore key rotation request failures as long as they come from our code
             }
         }
 
