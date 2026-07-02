@@ -254,8 +254,3 @@ children of `project32` can be authorized by using `*:project32:*`.
 - Clone the repository
 - Run `mvn clean package`
 - Upload the resulting `target/oidc-jwt.zip` file to TeamCity
-
-## Core plugin current status
-
-The plugin is currently in a stage between alpha and beta: we already use it on some of our internal production 
-installations, but it hasn't been approved by the TeamCity team yet. It also hasn't been tested in multi-node environments.
