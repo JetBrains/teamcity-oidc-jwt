@@ -187,6 +187,32 @@ To prevent a build type from assuming the role when it is moved around the proje
 }
 ```
 
+### Allow multiple Build Types to Assume the Role
+The examples above can be extended to assume the role from multiple specific build types:
+```json
+"StringLike": {
+    "teamcity.example.com/app/oidc-jwt:sub": [
+        "*:bt31337",
+        "*:bt93754" 
+    ]
+}
+```
+
+```json
+"StringEquals": {
+   "teamcity.example.com/app/oidc-jwt:aud": [
+        "https://teamcity.example.com/app/oidc-jwt"
+   ],
+   "teamcity.example.com/app/oidc-jwt:sub": [
+        "_Root:project123:project4567:bt31337",
+        "_Root:project831:project842:bt93754"
+   ]
+}
+```
+
+For details on how IAM evaluates these conditions, see 
+[the official AWS documentation](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-logic-multiple-context-keys-or-values.html).
+
 ### Allow All Build Types of a Certain Project to Assume the Role
 With the following condition, all build configurations of a certain project _and its subprojects_ will be able to assume the role:
 ```json
