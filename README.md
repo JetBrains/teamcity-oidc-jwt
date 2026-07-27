@@ -1,7 +1,7 @@
 # TeamCity OIDC JWT plugin
 
 It generates OpenID Connect JWT tokens for TeamCity builds for credential-less authentication in
-- [AWS IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_oidc.html)
+- [AWS IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_oidc.html) ([setup guide](./docs/aws/README.md))
 - [GCP Workload Identity Federation](https://cloud.google.com/iam/docs/workload-identity-federation)
 - [Azure / Microsoft Entra ID](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation)
 - [Oracle Cloud Infrastructure](https://docs.oracle.com/en-us/iaas/Content/Identity/api-getstarted/json_web_token_exchange.htm)
@@ -34,6 +34,9 @@ Download the latest release or [build from source](#Build),
 
 If your server is not accessible from the internet, see [Support for installations inaccessible from the internet](#Support-for-installations-inaccessible-from-the-internet) 
 section for additional required configuration steps.
+
+Additional configuration of the token consumer may be required for builds to authenticate using OIDC tokens. 
+Refer to the official documentation or the [AWS IAM setup guide](./docs/aws/README.md) to learn more.
 
 ## Usage
 
