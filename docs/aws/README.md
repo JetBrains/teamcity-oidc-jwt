@@ -6,22 +6,27 @@ This document describes the steps required to set up AWS access from TeamCity bu
 
 ### Using the UI
 1. Go to the build configuration settings.
-2. Switch to the `Build Features` tab.
-3. Click the `Add build feature` button.
-4. Look for `OIDC Token (in build parameters)` or `OIDC Token (on demand via HTTP request)`, depending on the preferred way of obtaining the token from the build.
-5. Choose an audience for the token: the default value should be fine, but you can pick any arbitrary unique string. AWS only supports tokens with a single audience consisting of up to 255 alphanumeric or `:_.-/` characters.
+2. Switch to the **Build Features** tab.
+3. Click the **Add build feature** button.
+4. Look for **OIDC Token (in build parameters)** or **OIDC Token (on demand via HTTP request)**, depending on the 
+   preferred way of obtaining the token from the build.
+5. Choose an audience for the token: the default value should be fine, but you can pick any arbitrary unique string.
+   AWS only supports tokens with a single audience consisting of up to 255 alphanumeric or `:_.-/` characters.
 6. Configure the remaining parameters as needed.
-7. Copy the `Audience`,  `Issuer`, and `sub claim` values and save your changes.
+7. Copy the **`Audience`**,  **`Issuer`**, and  **`sub` claim** values and save your changes.
 
 ### Using Kotlin DSL
 1. Add either `oidcTokenInParams` or `oidcTokenOnDemand` to the build features block of your build type definition.
-2. Choose an audience for the token using the `audiences` parameter. If not specified, the default value is the issuer URL. AWS supports audiences consisting of up to 255 alphanumeric or `:_.-/` characters.
-3. Apply your DSL.
-4. Collect the `Issuer` and `sub claim` values from the UI as described in the [`Using the UI` section](#using-the-ui) or programmatically:
+2. Choose an audience for the token using the `audiences` parameter. If not specified, the default value is the issuer URL.
+   AWS supports audiences consisting of up to 255 alphanumeric or `:_.-/` characters.
+3. Apply the DSL changes.
+4. Obtain the **`Issuer`** and  **`sub` claim** values from the UI as described in the [`Using the UI` section](#using-the-ui) or programmatically:
     - The `Issuer` value can be fetched from the `issuer` field of the `%teamcity.serverUrl%/app/oidc-jwt/.well-known/openid-configuration` JSON.
     - The default `sub` claim follows the root-to-child hierarchy of internal IDs (for example, `_Root:project123:project4567:bt31337`).
       To fetch these IDs via the REST API, query 
-`%teamcity.serverUrl%/app/rest/buildTypes?locator=id:{BUILD_TYPE_ID}&fields=buildType(internalId,project(internalId,parentProject(internalId,parentProject(internalId,name))))`. Depending on the project hierarchy depth, you might need to nest `parentProject(internalId,name)` multiple times until you reach the `_Root` project.
+`%teamcity.serverUrl%/app/rest/buildTypes?locator=id:{BUILD_TYPE_ID}&fields=buildType(internalId,project(internalId,parentProject(internalId,parentProject(internalId,name))))`.
+      Depending on the depth of the project hierarchy, you might need to nest `parentProject(internalId,name)` multiple
+      times until you reach the `_Root` project.
 
 > [!WARNING]
 > The `sub` value can change with DSL updates if the [`uuid` parameter](https://teamcity.jetbrains.com/app/dsl-documentation/root/build-type-settings/uuid.html) 
@@ -32,20 +37,21 @@ To perform this step, you will need sufficient permissions to change identity pr
 
 > [!NOTE]
 > This step is a short summary of [the official AWS documentation](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
-> on how to create an OIDC identity provider. There you can find more detailed instructions on creating an OIDC identity provider using the AWS Console, CLI, or API.
+> on how to create an OIDC identity provider. There you can find more detailed instructions on creating
+> an OIDC identity provider using the AWS Console, CLI, or API.
 
 > [!TIP]
 > A Terraform configuration example for this step is provided in [`main.tf`](./main.tf).
 
 ### Step 2.1. Create an Identity Provider
 1. Open the AWS Management Console for the desired AWS account.
-2. Go to the [`Identity providers`](https://console.aws.amazon.com/iam/home#/identity_providers) list.
-3. Click the `Add provider` button in the top-right corner of the console.
-4. In the `Add Identity provider` wizard, select the `OpenID Connect` provider type.
-5. Paste the `Issuer` value you copied into the `Provider URL` field.
-6. Paste your chosen `Audience` into the `Audience` field.
-7. Optionally, specify the desired tags in the `Add tags` section of the wizard.
-8. Click the `Add provider` button and wait for the provider to be created.
+2. Go to the [**Identity providers**](https://console.aws.amazon.com/iam/home#/identity_providers) list.
+3. Click the **Add provider** button in the top-right corner of the console.
+4. In the **Add Identity provider** wizard, select the `OpenID Connect` provider type.
+5. Paste the `Issuer` value you copied into the **Provider URL** field.
+6. Paste your chosen `Audience` into the **Audience** field.
+7. Optionally, specify the desired tags in the **Add tags** section of the wizard.
+8. Click the **Add provider** button and wait for the provider to be created.
 
 > [!WARNING]
 > Even though identity providers support multiple audiences, 
@@ -175,7 +181,7 @@ Use the following condition allow a single build type to assume the role regardl
 }
 ```
 
-To prevent a build type from assuming the role when it is moved around the project hierarchy, use the entire `sub` claim with `StringEquals`:
+To prevent a build type from assuming the role when it is moved within the project hierarchy, use the entire `sub` claim with `StringEquals`:
 ```json
 "StringEquals": {
     "teamcity.example.com/app/oidc-jwt:aud": [
@@ -214,7 +220,7 @@ For details on how IAM evaluates these conditions, see
 [the official AWS documentation](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-logic-multiple-context-keys-or-values.html).
 
 ### Allow All Build Types of a Certain Project to Assume the Role
-With the following condition, all build configurations of a certain project _and its subprojects_ will be able to assume the role:
+With the following condition, all build configurations of a specific project _and its subprojects_ will be able to assume the role:
 ```json
 "StringLike": {
     "teamcity.example.com/app/oidc-jwt:sub": [
