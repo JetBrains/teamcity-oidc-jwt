@@ -2,96 +2,97 @@
 
 This document describes the steps required to set up AWS access from TeamCity builds.
 
-## Step 1. Set Up OIDC for a TeamCity Build
+## Step 1. Set up OIDC for a TeamCity build
 
 ### Using the UI
+
 1. Go to the build configuration settings.
 2. Switch to the **Build Features** tab.
 3. Click the **Add build feature** button.
-4. Look for **OIDC Token (in build parameters)** or **OIDC Token (on demand via HTTP request)**, depending on the 
-   preferred way of obtaining the token from the build.
-5. Choose an audience for the token: the default value should be fine, but you can pick any arbitrary unique string.
-   AWS only supports tokens with a single audience consisting of up to 255 alphanumeric or `:_.-/` characters.
+4. Look for **OIDC Token (in build parameters)** or **OIDC Token (on demand via HTTP request)**, depending on
+   how you want to obtain the token during the build.
+5. Choose an audience for the token: the default value is suitable in most cases, but you can specify any unique string
+   consisting of up to 255 alphanumeric or `:_.-/` characters. **AWS does not support multiple audiences in a single token.**
 6. Configure the remaining parameters as needed.
-7. Copy the **`Audience`**,  **`Issuer`**, and  **`sub` claim** values and save your changes.
+7. Copy the values of the **Audience**, **Issuer**, and **`sub` claim** fields.
+8. Save your changes using the **Save** button.
 
 ### Using Kotlin DSL
+
 1. Add either `oidcTokenInParams` or `oidcTokenOnDemand` to the build features block of your build type definition.
-2. Choose an audience for the token using the `audiences` parameter. If not specified, the default value is the issuer URL.
-   AWS supports audiences consisting of up to 255 alphanumeric or `:_.-/` characters.
+2. Choose an audience for the token using the `audiences` parameter. When not specified, the default value (issuer URL)
+   is used. AWS requires the audience to consist of up to 255 alphanumeric or `:_.-/` characters and
+   **does not support multiple audiences in a single token**.
 3. Apply the DSL changes.
-4. Obtain the **`Issuer`** and  **`sub` claim** values from the UI as described in the [`Using the UI` section](#using-the-ui) or programmatically:
-    - The `Issuer` value can be fetched from the `issuer` field of the `%teamcity.serverUrl%/app/oidc-jwt/.well-known/openid-configuration` JSON.
+4. Obtain the values of **Issuer** and  **`sub` claim** fields from the UI as described in the [`Using the UI` section](#using-the-ui) or programmatically:
+    - The **Issuer** value can be fetched from the `issuer` field of the `%teamcity.serverUrl%/app/oidc-jwt/.well-known/openid-configuration` JSON.
     - The default `sub` claim follows the root-to-child hierarchy of internal IDs (for example, `_Root:project123:project4567:bt31337`).
-      To fetch these IDs via the REST API, query 
-`%teamcity.serverUrl%/app/rest/buildTypes?locator=id:{BUILD_TYPE_ID}&fields=buildType(internalId,project(internalId,parentProject(internalId,parentProject(internalId,name))))`.
+      To fetch these IDs via the REST API, query
+      `%teamcity.serverUrl%/app/rest/buildTypes?locator=id:{BUILD_TYPE_ID}&fields=buildType(internalId,project(internalId,parentProject(internalId,parentProject(internalId,name))))`.
       Depending on the depth of the project hierarchy, you might need to nest `parentProject(internalId,name)` multiple
       times until you reach the `_Root` project.
 
 > [!WARNING]
-> The `sub` value can change with DSL updates if the [`uuid` parameter](https://teamcity.jetbrains.com/app/dsl-documentation/root/build-type-settings/uuid.html) 
+> The `sub` value can change with DSL updates if the [`uuid` parameter](https://teamcity.jetbrains.com/app/dsl-documentation/root/build-type-settings/uuid.html)
 > is not specified and the [`Id` parameter](https://teamcity.jetbrains.com/app/dsl-documentation/root/id/index.html) is changed for the build type.
 
 ## Step 2. Configure AWS IAM
+
 To perform this step, you will need sufficient permissions to change identity provider settings.
 
 > [!NOTE]
-> This step is a short summary of [the official AWS documentation](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
-> on how to create an OIDC identity provider. There you can find more detailed instructions on creating
-> an OIDC identity provider using the AWS Console, CLI, or API.
+> This step briefly summarizes [the official AWS documentation](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
+> on how to create an OIDC identity provider. Refer to the linked documentation page for more detailed instructions
+> on creating an OIDC identity provider using the AWS Management Console, the AWS CLI, or API.
 
 > [!TIP]
 > A Terraform configuration example for this step is provided in [`main.tf`](./main.tf).
 
-### Step 2.1. Create an Identity Provider
+### Step 2.1. Create an identity provider
+
 1. Open the AWS Management Console for the desired AWS account.
 2. Go to the [**Identity providers**](https://console.aws.amazon.com/iam/home#/identity_providers) list.
 3. Click the **Add provider** button in the top-right corner of the console.
-4. In the **Add Identity provider** wizard, select the `OpenID Connect` provider type.
-5. Paste the `Issuer` value you copied into the **Provider URL** field.
-6. Paste your chosen `Audience` into the **Audience** field.
+4. In the **Add Identity provider** wizard, select the **OpenID Connect** provider type.
+5. Paste the **Issuer** value you copied into the **Provider URL** field.
+6. Paste the **Audience** value into the **Audience** field.
 7. Optionally, specify the desired tags in the **Add tags** section of the wizard.
 8. Click the **Add provider** button and wait for the provider to be created.
 
-> [!WARNING]
-> Even though identity providers support multiple audiences, 
-> AWS only accepts tokens with a single `aud` claim.
->
-> Please make sure **you specified only a single audience** in the previous step. 
-> You can add multiple token-issuing build features when necessary.
+### Step 2.2. Assign roles to the identity provider
 
-### Step 2.2. Assign Roles to the Identity Provider
+#### Create a new role
 
-#### Create a New Role
-1. Select your newly created provider in the list and click its name to open the details page.
-2. Click the `Assign role` button in the top-right corner.
-3. Select `Create a new role` and click `Next`.
-4. On the `Select trusted entity` page, select the previously specified audience in the `Audience` picker.
-5. In the `Conditions` block, specify one or more conditions on the `sub` claim as described in the [Trust Policy Configuration](#trust-policy-configuration) section.
-   Alternatively, skip this step and finish creating this role, then proceed to the [Use an existing role](#use-an-existing-role) section.
-6. Select the permissions policies to be assigned to the build or create an inline one.
+1. In the list, click the name of the provider you created to open the details page.
+2. Click the **Assign role** button in the top-right corner.
+3. Select **Create a new role** and click **Next**.
+4. On the **Select trusted entity** page, select the previously specified audience in the **Audience** picker.
+5. In the **Conditions** block, specify one or more conditions on the `sub` claim as described in the [Trust policy configuration](#trust-policy-configuration) section.
+   Alternatively, create the role without any `sub` conditions and then proceed to the [Use an existing role](#use-an-existing-role) section.
+6. Select the permissions policies to attach to the role or create an inline one.
 7. Specify a role name and description, then save the role.
-8. If you haven't specified any conditions in step 5, follow the [Use an existing role](#use-an-existing-role) section starting at step 3.
+8. If you did not specify any `sub` conditions in step 5, follow the [Use an existing role](#use-an-existing-role) section starting at step 3.
 
-#### Use an Existing Role
-1. Select your newly created provider in the list and click its name to open the details page.
+#### Use an existing role
+
+1. In the list, click the name of the provider you created to open the details page.
 2. Copy the ARN of the provider.
 3. Go to the [roles list](https://console.aws.amazon.com/iam/home#/roles), find the desired role, and click its name to open the details page.
-4. Switch to the `Trust relationships` tab.
-5. Click the `Edit trust policy` button.
-6. Proceed to the [Trust Policy Configuration](#trust-policy-configuration) section for examples of `Statement` block objects you could add to the existing trust policy.
+4. Switch to the **Trust relationships** tab.
+5. Click the **Edit trust policy** button.
+6. See the [Trust policy configuration](#trust-policy-configuration) section for examples of `Statement`s and conditions
+   to add to the existing trust policy.
 
+## Step 3. Assume the role during a build
 
-## Step 3. Assume the Role During a Build
-Once you've configured the identity provider and a role on the AWS side, you can assume the role in your build.
+Once you have configured the identity provider and a role in AWS, you can assume the role in your build.
 
 ### Using the AWS CLI
 
-The official AWS CLI client `aws` will exchange the token stored in a file specified by 
-the `AWS_WEB_IDENTITY_TOKEN_FILE` environment variable. To use it, save the OIDC token 
-issued by TeamCity to a file before running the command.
+The AWS CLI client (`aws`) expects an OIDC token to be in a file. The path to the file can be specified
+using the `AWS_WEB_IDENTITY_TOKEN_FILE` environment variable.
 
-Here's an example of assuming the role this way using the `OIDC Token (in build parameters)` build feature:
+The following example assumes the role using the **OIDC Token (in build parameters)** build feature:
 
 ```bash
 #!/bin/bash
@@ -102,19 +103,19 @@ export AWS_ROLE_ARN="arn:aws:iam::XXXXXXXXXXXX:role/your-role"
 
 AWS_WEB_IDENTITY_TOKEN_FILE=$(mktemp)
 trap 'rm -f "$AWS_WEB_IDENTITY_TOKEN_FILE"' EXIT
-chown 600 "$AWS_WEB_IDENTITY_TOKEN_FILE"
+chmod 600 "$AWS_WEB_IDENTITY_TOKEN_FILE"
 export AWS_WEB_IDENTITY_TOKEN_FILE
 echo "$TEAMCITY_BUILD_OIDC_TOKEN" > "$AWS_WEB_IDENTITY_TOKEN_FILE"
 
-# You can now use AWS CLI
+# You can now use the AWS CLI
 aws sts get-caller-identity
 ```
 
 ### Without the AWS CLI
 
-To assume the role without using the AWS CLI, you will need to exchange the OIDC token yourself.
-For an example script that assumes a role using the `OIDC Token (in build parameters)`
-build feature, see [`aws_assume_role.py`](./aws_assume_role.py), which can be used as follows:
+To assume the role without using the AWS CLI, you will need to exchange the OIDC token directly.
+See [`aws_assume_role.py`](./aws_assume_role.py) for an example script that uses the **OIDC Token (in build parameters)**
+build feature to exchange the token.
 
 ```bash
 #!/bin/bash
@@ -123,19 +124,20 @@ set -euo pipefail
 export AWS_REGION="eu-west-1"
 export AWS_ROLE_ARN="arn:aws:iam::XXXXXXXXXXXX:role/your-role"
 
-# This will export `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` envvars
+# This will export `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` environment variables
 eval "$(./aws_assume_role.py)"
 
 # You can now use any AWS-related software that uses these environment variables
 terraform plan
 
-# AWS CLI works too
+# The AWS CLI works too
 aws sts get-caller-identity
 ```
 
+## Trust policy configuration
 
-## Trust Policy Configuration
-By default, the trust policy for a newly generated role without any conditions looks like this:
+By default, the trust policy for a role created by the identity provider wizard looks like this:
+
 ```json
 {
     "Version": "2012-10-17",
@@ -159,20 +161,21 @@ By default, the trust policy for a newly generated role without any conditions l
 ```
 
 > [!CAUTION]
-> The default policy allows **all** builds to assume the role using an OIDC token. 
-> In production, you should add `sub` claim conditions to allow only specific projects 
+> The default policy allows **all** builds to assume the role using an OIDC token.
+> In production, you should add conditions on the `sub` claim to allow only specific projects
 > or build configurations to assume the role.
 
 > [!WARNING]
-> When copying examples from this section, please remember to keep the `StringEquals` condition for the `:aud` parameter. 
-> Otherwise, tokens with any `aud` claim will be accepted from your issuer.
+> When copying examples from this section, please remember to keep the `StringEquals` condition on the `:aud` claim.
+> Otherwise, tokens with any audience value will be accepted, posing a security risk.
 
-All the examples assume the `sub claim` of the build to be `_Root:project123:project4567:bt31337`.
-For more information on trust policy conditions, refer to the 
+The examples assume that the build's **`sub` claim** is `_Root:project123:project4567:bt31337`.
+For more information on trust policy conditions, refer to the
 [official AWS documentation](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition.html).
 
-### Allow a Single Build Type to Assume the Role
-Use the following condition allow a single build type to assume the role regardless of its place in the project hierarchy:
+### Allow a single build type to assume the role
+
+Use the following condition to allow a single build type to assume the role regardless of its place in the project hierarchy:
 ```json
 "StringLike": {
     "teamcity.example.com/app/oidc-jwt:sub": [
@@ -193,34 +196,36 @@ To prevent a build type from assuming the role when it is moved within the proje
 }
 ```
 
-### Allow multiple Build Types to Assume the Role
-The examples above can be extended to assume the role from multiple specific build types:
+### Allow multiple build types to assume the role
+
+You can extend the examples above to allow multiple build types to assume the role:
 ```json
 "StringLike": {
     "teamcity.example.com/app/oidc-jwt:sub": [
         "*:bt31337",
-        "*:bt93754" 
+        "*:bt93754"
     ]
 }
 ```
 
 ```json
 "StringEquals": {
-   "teamcity.example.com/app/oidc-jwt:aud": [
+    "teamcity.example.com/app/oidc-jwt:aud": [
         "https://teamcity.example.com/app/oidc-jwt"
-   ],
-   "teamcity.example.com/app/oidc-jwt:sub": [
+    ],
+    "teamcity.example.com/app/oidc-jwt:sub": [
         "_Root:project123:project4567:bt31337",
         "_Root:project831:project842:bt93754"
-   ]
+    ]
 }
 ```
 
-For details on how IAM evaluates these conditions, see 
+For details on how IAM evaluates these conditions, see
 [the official AWS documentation](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-logic-multiple-context-keys-or-values.html).
 
-### Allow All Build Types of a Certain Project to Assume the Role
-With the following condition, all build configurations of a specific project _and its subprojects_ will be able to assume the role:
+### Allow all build types of a project to assume the role
+
+With the following condition, all build configurations in a specific project _and its subprojects_ will be able to assume the role:
 ```json
 "StringLike": {
     "teamcity.example.com/app/oidc-jwt:sub": [
@@ -229,8 +234,9 @@ With the following condition, all build configurations of a specific project _an
 }
 ```
 
-### Allow a Specific Direct Child of a Project to Assume the Role
-If you want the role to be assumable from a build configuration only when it is a direct child of a specific project, 
+### Allow a specific direct child of a project to assume the role
+
+To allow a build configuration to assume the role only when it is a direct child of a specific project,
 find the desired project's internal ID and use the following condition:
 ```json
 "StringLike": {
@@ -240,13 +246,17 @@ find the desired project's internal ID and use the following condition:
 }
 ```
 
-### Personal Builds
-Personal builds cannot assume the role by default and must be specified explicitly to prevent abuse.
+### Personal builds
 
-To allow a single user's builds to assume the role, find their numeric ID on the TeamCity server, 
-take any of the examples above and prepend the `u{ID}_` prefix to each component of the `sub` claim
-(separated by colons). Here are a few examples allowing personal builds for a user 
-with ID `42` alongside non-personal ones:
+For security reasons, personal builds are not allowed to assume the role by default and must be allowed explicitly.
+
+To allow a single user's builds to assume the role:
+
+1. Find their numeric ID on the TeamCity server.
+2. Choose any of the examples above.
+3. Prepend the `u{ID}_` prefix to each component of the `sub` claim (separated by colons).
+
+The following examples allow regular builds and personal builds belonging to the user with ID `42`:
 
 ```json
 "StringLike": {
@@ -256,6 +266,7 @@ with ID `42` alongside non-personal ones:
     ]
 }
 ```
+
 ```json
 "StringLike": {
     "teamcity.example.com/app/oidc-jwt:sub": [
@@ -265,7 +276,7 @@ with ID `42` alongside non-personal ones:
 }
 ```
 
-You can also replace the numeric ID with a wildcard so that all users can assume the role from personal builds:
+You can also replace the numeric ID with a wildcard to allow personal builds belonging to any user to assume the role:
 ```json
 "StringLike": {
     "teamcity.example.com/app/oidc-jwt:sub": [
@@ -274,6 +285,7 @@ You can also replace the numeric ID with a wildcard so that all users can assume
     ]
 }
 ```
+
 ```json
 "StringLike": {
     "teamcity.example.com/app/oidc-jwt:sub": [
@@ -284,18 +296,19 @@ You can also replace the numeric ID with a wildcard so that all users can assume
 ```
 
 > [!WARNING]
-> It is not recommended to omit the trailing `:` for `projectXXXXX` components when using wildcards, 
-> since `project1234*` also matches projects `project12345`, `project123456`, and so on.
+> Do not omit the trailing `:` for `projectXXXXX` components when using wildcards,
+> since `project123*` also matches projects `project1234`, `project12345`, and so on.
 
+### A complete trust policy example
 
-### A Complete Trust Policy Example
 Consider the following requirements for a given role:
-- Build type `bt392` can assume the role unless it is moved elsewhere in the project hierarchy.
-- `project423` and all its build types (including children) should be allowed to assume the role.
-- User `u927` should be able to assume the role from their personal builds in `project230` and its children.
+- Build type `bt392` should be able to assume the role unless it is moved elsewhere in the project hierarchy.
+- All build configurations in `project423` and its subprojects should be allowed to assume the role.
+- Personal builds belonging to the user with ID `927` should be allowed to assume the role when their build configurations
+  are in `project230` or its subprojects.
 - Build type `bt31337` should assume the role regardless of its place in the project hierarchy.
 
-Here's a trust policy that matches the restrictions above:
+The following trust policy implements these requirements:
 ```json
 {
     "Version": "2012-10-17",
