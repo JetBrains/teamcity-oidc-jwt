@@ -4,6 +4,7 @@ It generates OpenID Connect JWT tokens for TeamCity builds for credential-less a
 - [AWS IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_oidc.html) ([setup guide](./docs/aws/README.md))
 - [GCP Workload Identity Federation](https://cloud.google.com/iam/docs/workload-identity-federation) ([setup guide](./docs/gcp/README.md))
 - [Azure / Microsoft Entra ID](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation)
+- [Nebius AI Cloud](https://docs.nebius.com/cli/reference/iam/federated-credentials/index) ([setup guide](./docs/nebius/README.md))
 - [Oracle Cloud Infrastructure](https://docs.oracle.com/en-us/iaas/Content/Identity/api-getstarted/json_web_token_exchange.htm)
 - [Kubernetes v1.34+](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#openid-connect-tokens)
 - and any other OIDC token consumer.
@@ -36,8 +37,8 @@ If your server is not accessible from the internet, see [Support for installatio
 section for additional required configuration steps.
 
 Additional configuration of the token consumer may be required for builds to authenticate using OIDC tokens. 
-Refer to our setup guides for popular cloud providers ([AWS](./docs/aws/README.md), [GCP](./docs/gcp/README.md))
-and the official documentation of the consumer to learn more.
+Refer to our setup guides for popular cloud providers ([AWS](./docs/aws/README.md), [GCP](./docs/gcp/README.md),
+[Nebius](./docs/nebius/README.md)) and the official documentation of the consumer to learn more.
 
 ## Usage
 
