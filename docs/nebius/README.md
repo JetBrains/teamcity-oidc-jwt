@@ -14,6 +14,16 @@ for a Nebius IAM access token and uses that token like any other IAM token.
 The examples below use the [Nebius CLI](https://docs.nebius.com/cli). Every step can also be performed in the
 [Nebius console](https://console.nebius.com/) or through the API.
 
+## Prerequisites
+
+Nebius verifies token signatures by fetching the issuer's OIDC discovery document and key set over the public
+internet. **Your issuer URL must therefore be served on the public internet over HTTPS, with a publicly trusted
+certificate.** A TeamCity server reachable only from your corporate network cannot be used as an issuer directly —
+see [Step 3](#step-3-create-a-federated-credential) for the two supported alternatives, both of which avoid the fetch.
+
+You will also need permissions to create service accounts, federated credentials, and access permits in the target
+Nebius project.
+
 ## Step 1. Set up OIDC for a TeamCity build
 
 ### Using the UI
@@ -90,14 +100,27 @@ nebius iam federated-credentials create \
 ```
 
 - `--oidc-provider-issuer-url` is the **Issuer** value from [Step 1](#step-1-set-up-oidc-for-a-teamcity-build).
-  Nebius appends `/.well-known/openid-configuration` to it and follows `jwks_uri` to fetch the signing keys, so this URL
-  must be reachable from Nebius.
 - `--federated-subject-id` is the **`sub` claim** value from [Step 1](#step-1-set-up-oidc-for-a-teamcity-build).
 - `--subject-id` is the service account that the build impersonates.
 
+> [!IMPORTANT]
+> **The issuer URL must be served on the public internet.** To verify a token signature, Nebius fetches
+> `<issuer>/.well-known/openid-configuration` and then the `jwks_uri` it points to. Those requests come from Nebius'
+> own infrastructure, not from your network or from the build agent, so:
+>
+> - both the discovery document and the `jwks_uri` host must be publicly resolvable and reachable — `jwks_uri` may
+>   point at a different host than the issuer, and that host must be public too;
+> - the URL must be HTTPS with a certificate from a publicly trusted CA; a private CA or a self-signed certificate
+>   will not validate;
+> - a TeamCity server behind a VPN, split-horizon DNS, an SSO proxy, or an IP allowlist will not work as an issuer,
+>   even though the plugin serves those endpoints without authentication.
+>
+> If you cannot expose the server, use one of the two options below instead — neither requires a reachable issuer.
+
 If your TeamCity server is not reachable from the internet, either host the discovery documents externally as described
-in the [main README](../../README.md#support-for-installations-inaccessible-from-the-internet), or pass the key set
-inline:
+in the [main README](../../README.md#support-for-installations-inaccessible-from-the-internet) — an S3 bucket or any
+static host works, and the issuer URL then points there rather than at TeamCity — or skip the fetch entirely by
+passing the key set inline:
 
 ```bash
 nebius iam federated-credentials create \
@@ -109,13 +132,19 @@ nebius iam federated-credentials create \
     --subject-id "$NEBIUS_SERVICE_ACCOUNT_ID"
 ```
 
+With `--oidc-provider-jwk-set-json`, the key set is resolved locally and Nebius makes no outbound request, so the
+issuer URL never has to be reachable — it is only an identifier, matched against the token's `iss` claim. It is still
+required.
+
 > [!WARNING]
 > An inline key set is a copy, not a reference. You must update the federated credential with
-> `nebius iam federated-credentials update` every time you rotate the signing key, or builds will stop authenticating.
-> The issuer URL is still required in this case.
+> `nebius iam federated-credentials update` every time the signing key changes, or builds will stop authenticating.
+> That includes [manual and programmatic rotation](../../README.md#key-rotation), and the implicit rotation caused by
+> changing the RSA key size or the ECDSA signature algorithm.
 
 > [!NOTE]
-> Nebius reads at most 50 keys from a key set, and limits the discovery and JWKS responses to 100 KB each.
+> When the key set *is* fetched, Nebius reads at most 50 keys from it, and limits the discovery and JWKS responses to
+> 100 KB each.
 
 ## Step 4. Grant the service account access
 
@@ -350,7 +379,7 @@ Errors from the exchange endpoint include `requestId` and `traceId`. Quote them 
 | --- | --- |
 | `Unable to parse token as JWT` | The `subject_token` is empty or truncated. Check that the build feature is enabled and that the parameter reached the build step. |
 | `Content-Type 'application/json' is not supported` (HTTP 415) | The request body must be `application/x-www-form-urlencoded`. |
-| Signature or key errors | Nebius cannot reach `<issuer>/.well-known/openid-configuration`, or the signing key was rotated after an inline `jwk_set_json` was configured. |
+| Signature or key errors | Nebius cannot reach `<issuer>/.well-known/openid-configuration` or the `jwks_uri` it points to over the public internet, the certificate is not publicly trusted, or the signing key changed after an inline `jwk_set_json` was configured. |
 | `PERMISSION_DENIED` on an API call after a successful exchange | The exchange worked and the service account was impersonated, but it has no role on the resource. Revisit [Step 4](#step-4-grant-the-service-account-access). |
 | Exchange fails only for personal builds | The `sub` claim of a personal build is prefixed and does not match the federated credential. |
 
@@ -360,3 +389,25 @@ To see which identity a token actually maps to, decode the payload of the TeamCi
 ```bash
 jq -R 'split(".") | .[1] | @base64d | fromjson | {iss, sub, aud, exp}' <<<"$TEAMCITY_BUILD_OIDC_TOKEN"
 ```
+
+### Checking that the issuer is publicly reachable
+
+Run this from a host outside your corporate network — a cloud VM or any machine off the VPN. Running it from inside
+will succeed even when Nebius cannot reach the issuer, which is the usual reason this problem goes unnoticed:
+
+```bash
+ISSUER="https://teamcity.example.com/app/oidc-jwt"
+
+# Must return the discovery document over a publicly trusted certificate.
+curl -fsS "$ISSUER/.well-known/openid-configuration" | jq '{issuer, jwks_uri}'
+
+# The jwks_uri from that document must be reachable too, and may be on another host.
+curl -fsS "$(curl -fsS "$ISSUER/.well-known/openid-configuration" | jq -r '.jwks_uri')" | jq '.keys | length'
+```
+
+Both commands must succeed without `--insecure` and without any proxy or VPN. If the first one works but the second
+does not, the discovery document is advertising a `jwks_uri` that is not publicly resolvable — a common result of
+hosting the discovery document externally while leaving `jwks_uri` pointing at an internal TeamCity URL.
+
+Also confirm that the `issuer` field in the response matches `--oidc-provider-issuer-url` and the token's `iss` claim
+exactly. A trailing-slash difference is enough to break the match.

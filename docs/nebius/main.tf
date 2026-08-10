@@ -16,6 +16,11 @@ provider "nebius" {}
 # -----------------------------------------------------------------------------
 
 # The `iss` claim of the tokens issued by the plugin. See Step 1 of the guide.
+#
+# This URL must be served on the public internet over HTTPS with a publicly
+# trusted certificate: Nebius fetches the discovery document and the key set
+# from its own infrastructure. If the server is internal, either host the
+# discovery documents externally or set `jwk_set_json` below.
 variable "teamcity_oidc_issuer" {
   type    = string
   default = "https://teamcity.example.com/app/oidc-jwt"
@@ -61,10 +66,14 @@ resource "nebius_iam_v1_federated_credentials" "teamcity_bt31337" {
   oidc_provider = {
     issuer_url = var.teamcity_oidc_issuer
 
-    # Uncomment for TeamCity installations that are not reachable by Nebius.
+    # Uncomment for TeamCity installations that are not reachable from the
+    # public internet. The key set is then resolved locally and Nebius makes no
+    # outbound request, so `issuer_url` becomes just an identifier matched
+    # against the token's `iss` claim.
+    #
     # The value can be fetched from
     # `%teamcity.serverUrl%/app/oidc-jwt/.well-known/jwks` and must be updated
-    # whenever the signing key is rotated.
+    # whenever the signing key changes.
     #
     # jwk_set_json = file("${path.module}/jwks.json")
   }
